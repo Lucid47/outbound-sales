@@ -81,6 +81,22 @@ final class ContactImportService {
         return imported
     }
 
+    func allCustomers() async throws -> [ContactImportCustomer] {
+        try await requestAccessIfNeeded()
+        let request = CNContactFetchRequest(keysToFetch: Self.contactKeys)
+        request.sortOrder = .userDefault
+        var contacts: [ContactImportCustomer] = []
+        try store.enumerateContacts(with: request) { contact, _ in
+            let imported = Self.importCustomer(from: contact)
+            if !imported.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !imported.phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                contacts.append(imported)
+            }
+        }
+        guard !contacts.isEmpty else { throw ContactImportError.noContacts }
+        return contacts
+    }
+
     nonisolated static func importCustomers(from contacts: [CNContact]) -> [ContactImportCustomer] {
         contacts
             .map(importCustomer(from:))

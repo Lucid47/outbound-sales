@@ -2,6 +2,21 @@
 
 주요 변경 이력을 기록합니다.
 
+## 2026-07-22
+
+- macOS 네이티브 앱 타깃 추가
+  - `native/OutboundSalesMac`에 macOS 15 이상용 SwiftUI 앱 프로젝트와 XcodeGen 명세 추가
+  - iPhone/iPad와 같은 `OutboundSalesCore`, `OutboundSalesNative` 패키지와 로컬/Drive 백업 스키마를 재사용
+  - 맥에서는 5개 주요 메뉴를 좌측 사이드바로 제공하고 창 크기 변경과 전체 화면을 지원
+  - CSV 가져오기, CSV 붙여넣기, Apple Vision 사진 OCR, 지도, 고객·기록·설정 화면 연결
+  - 이미지 파일 여러 장 선택, 썸네일 확인, 순차 OCR 및 페이지 결과 병합 지원
+  - macOS 연락처 개별 다중 선택과 연락처 그룹 가져오기 지원
+  - 고객별 전화·문자는 FaceTime/메시지 및 iPhone 연속성 기능으로 전달하고, Shortcuts 기반 통신사 단체문자 발송은 macOS에서 차단
+- 플랫폼 회귀 검증
+  - OutboundSalesCore 테스트 29개 통과
+  - macOS Swift 패키지 및 macOS 앱 Debug 빌드 성공
+  - generic iOS 기기 Debug 빌드 성공
+
 ## 2026-07-20
 
 - 고객리스트 가져오기 검토·저장 흐름 개선

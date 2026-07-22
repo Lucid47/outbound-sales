@@ -6,6 +6,8 @@ import Contacts
 import ContactsUI
 import PhotosUI
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 struct ImportView: View {
@@ -15,19 +17,20 @@ struct ImportView: View {
     @State private var showingAddCustomer = false
     @State private var importDraft: ImportDraft?
     @State private var contactImportDraft: ContactImportDraft?
+    @State private var isPreparingPhotos = false
+    @State private var isRecognizingPhotos = false
+    @State private var pendingOCRPhotos: [OCRPhotoSelection] = []
+    @State private var pendingOCRSourceTitle = "사진앱"
+    @State private var showingPhotoImportConfirmation = false
+    @State private var showingContactPicker = false
+    @State private var showingContactGroupPicker = false
     @State private var pastedCSV = """
     이름,전화번호,주소,메모
     홍길동,010-1234-5678,서울 강남구 테헤란로 152,방문 상담
     """
     #if os(iOS)
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
-    @State private var pendingOCRPhotos: [OCRPhotoSelection] = []
-    @State private var showingPhotoImportConfirmation = false
-    @State private var isPreparingPhotos = false
-    @State private var isRecognizingPhotos = false
     @State private var showingCamera = false
-    @State private var showingContactPicker = false
-    @State private var showingContactGroupPicker = false
     #else
     @State private var showingImageImporter = false
     #endif
@@ -61,7 +64,6 @@ struct ImportView: View {
                     .disabled(state.selectedListId == nil)
                 }
 
-                #if os(iOS)
                 Section("연락처에서 가져오기") {
                     Button {
                         showingContactPicker = true
@@ -79,7 +81,6 @@ struct ImportView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                #endif
 
                 Section("사진에서 가져오기") {
                     #if os(iOS)
@@ -145,6 +146,7 @@ struct ImportView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .modifier(MacGroupedFormModifier())
             .navigationTitle("가져오기")
             .fileImporter(
                 isPresented: $showingFileImporter,
@@ -175,19 +177,20 @@ struct ImportView: View {
                 ContactImportSaveSheet(draft: draft)
                     .environmentObject(state)
             }
-            #if os(iOS)
-            .onChange(of: selectedPhotoItems) { _, items in
-                guard !items.isEmpty else { return }
-                Task { await preparePhotoItems(items) }
-            }
             .sheet(isPresented: $showingPhotoImportConfirmation) {
                 OCRPhotoImportConfirmationSheet(photos: pendingOCRPhotos) {
                     showingPhotoImportConfirmation = false
                     let photos = pendingOCRPhotos
-                    Task { await recognizePhotos(photos, sourceTitle: "사진앱") }
+                    let sourceTitle = pendingOCRSourceTitle
+                    Task { await recognizePhotos(photos, sourceTitle: sourceTitle) }
                 } onCancel: {
                     clearPendingPhotos()
                 }
+            }
+            #if os(iOS)
+            .onChange(of: selectedPhotoItems) { _, items in
+                guard !items.isEmpty else { return }
+                Task { await preparePhotoItems(items) }
             }
             .sheet(isPresented: $showingContactPicker) {
                 ContactPickerSheet { contacts in
@@ -197,11 +200,20 @@ struct ImportView: View {
                     showingContactPicker = false
                 }
             }
+            #else
+            .sheet(isPresented: $showingContactPicker) {
+                ContactSelectionImportSheet { draft in
+                    showingContactPicker = false
+                    contactImportDraft = draft
+                }
+            }
+            #endif
             .sheet(isPresented: $showingContactGroupPicker) {
                 ContactGroupImportSheet { draft in
                     contactImportDraft = draft
                 }
             }
+            #if os(iOS)
             .sheet(isPresented: $showingCamera) {
                 CameraCaptureView { url in
                     prepareCameraPhoto(url)
@@ -211,13 +223,13 @@ struct ImportView: View {
             .fileImporter(
                 isPresented: $showingImageImporter,
                 allowedContentTypes: [.image],
-                allowsMultipleSelection: false
+                allowsMultipleSelection: true
             ) { result in
-                guard case .success(let urls) = result, let url = urls.first else {
+                guard case .success(let urls) = result, !urls.isEmpty else {
                     state.ocrMessage = "사진 선택을 완료하지 못했습니다."
                     return
                 }
-                Task { await recognizeImage(at: url, sourceTitle: "이미지 파일") }
+                prepareMacImageURLs(urls)
             }
             #endif
         }
@@ -271,12 +283,6 @@ struct ImportView: View {
         )
     }
 
-    private func recognizeImage(at url: URL, sourceTitle: String) async {
-        if let csv = await state.recognizeOCRCSV(url: url, headers: []) {
-            presentMappingPopup(text: csv, sourceFileName: "ocr-image.csv", sourceTitle: sourceTitle)
-        }
-    }
-
     #if os(iOS)
     private func preparePhotoItems(_ items: [PhotosPickerItem]) async {
         isPreparingPhotos = true
@@ -299,6 +305,7 @@ struct ImportView: View {
             return
         }
         pendingOCRPhotos = prepared
+        pendingOCRSourceTitle = "사진앱"
         showingPhotoImportConfirmation = true
     }
 
@@ -306,11 +313,45 @@ struct ImportView: View {
         do {
             let data = try Data(contentsOf: url)
             pendingOCRPhotos = [OCRPhotoSelection(order: 0, url: url, previewData: data)]
+            pendingOCRSourceTitle = "카메라"
             showingPhotoImportConfirmation = true
         } catch {
             state.ocrMessage = "촬영한 사진을 읽지 못했습니다."
         }
     }
+
+    #else
+    private func prepareMacImageURLs(_ urls: [URL]) {
+        isPreparingPhotos = true
+        defer { isPreparingPhotos = false }
+
+        var prepared: [OCRPhotoSelection] = []
+        for (index, sourceURL) in urls.enumerated() {
+            let accessGranted = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if accessGranted {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            do {
+                let data = try Data(contentsOf: sourceURL)
+                let pathExtension = sourceURL.pathExtension.isEmpty ? "image" : sourceURL.pathExtension
+                let temporaryURL = try writeTemporaryImage(data: data, extension: pathExtension)
+                prepared.append(OCRPhotoSelection(order: index, url: temporaryURL, previewData: data))
+            } catch {
+                continue
+            }
+        }
+
+        guard !prepared.isEmpty else {
+            state.ocrMessage = "선택한 사진을 읽지 못했습니다."
+            return
+        }
+        pendingOCRPhotos = prepared
+        pendingOCRSourceTitle = "이미지 파일"
+        showingPhotoImportConfirmation = true
+    }
+    #endif
 
     private func recognizePhotos(_ photos: [OCRPhotoSelection], sourceTitle: String) async {
         guard !photos.isEmpty else { return }
@@ -337,7 +378,9 @@ struct ImportView: View {
             try? FileManager.default.removeItem(at: photo.url)
         }
         pendingOCRPhotos = []
+        #if os(iOS)
         selectedPhotoItems = []
+        #endif
         showingPhotoImportConfirmation = false
     }
 
@@ -348,10 +391,18 @@ struct ImportView: View {
         try data.write(to: url, options: [.atomic])
         return url
     }
-    #endif
 }
 
-#if os(iOS)
+private struct MacGroupedFormModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.formStyle(.grouped)
+        #else
+        content
+        #endif
+    }
+}
+
 private struct OCRPhotoSelection: Identifiable {
     let id = UUID()
     let order: Int
@@ -376,6 +427,7 @@ private struct OCRPhotoImportConfirmationSheet: View {
                     HStack(spacing: 12) {
                         ForEach(photos.sorted(by: { $0.order < $1.order })) { photo in
                             VStack(spacing: 6) {
+                                #if os(iOS)
                                 if let image = UIImage(data: photo.previewData) {
                                     Image(uiImage: image)
                                         .resizable()
@@ -388,6 +440,20 @@ private struct OCRPhotoImportConfirmationSheet: View {
                                         .background(.quaternary)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
+                                #elseif os(macOS)
+                                if let image = NSImage(data: photo.previewData) {
+                                    Image(nsImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 112, height: 144)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "photo")
+                                        .frame(width: 112, height: 144)
+                                        .background(.quaternary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                #endif
                                 Text("\(photo.order + 1)번째")
                                     .font(.caption.weight(.semibold))
                             }
@@ -413,9 +479,11 @@ private struct OCRPhotoImportConfirmationSheet: View {
                 }
             }
         }
+        #if os(macOS)
+        .frame(minWidth: 560, minHeight: 360)
+        #endif
     }
 }
-#endif
 
 private func mergeOCRCSVDocuments(_ documents: [String]) -> String? {
     let parsedDocuments = documents.compactMap { try? parseCSV($0, firstRowIsHeader: true) }

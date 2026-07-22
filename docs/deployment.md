@@ -45,6 +45,30 @@ TestFlight 상태: 내부 기능 검증·외부 베타 테스트 그룹 배포 �
 
 TestFlight 업로드는 iOS/iPadOS 바이너리를 대상으로 합니다. App Store Connect 앱 레코드에서 macOS 플랫폼을 함께 선택했더라도 macOS 타깃 또는 Mac Catalyst 빌드를 별도로 만들기 전까지 macOS 앱은 포함되지 않습니다.
 
+## 네이티브 macOS 앱
+
+macOS 앱 프로젝트는 다음 경로에 있습니다.
+
+```text
+native/OutboundSalesMac/OutboundSalesMac.xcodeproj
+```
+
+개발 기준은 macOS 15 이상, SwiftUI, Apple Silicon이며 iOS 앱과 같은 Bundle ID와 공용 Swift Package를 사용합니다. 로컬 Debug 빌드는 다음 명령으로 검증합니다.
+
+```bash
+xcodebuild \
+  -project native/OutboundSalesMac/OutboundSalesMac.xcodeproj \
+  -scheme OutboundSalesMac \
+  -configuration Debug \
+  -destination 'platform=macOS,arch=arm64' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+App Store Connect 또는 외부 배포용으로는 macOS용 빌드 번호, 배포 인증서, App Sandbox 권한과 공증을 별도로 확인해야 합니다. 현재 단계는 로컬 실행 및 컴파일 검증 완료 상태이며 macOS TestFlight/App Store 업로드는 아직 수행하지 않았습니다.
+
+macOS 앱의 로컬 샌드박스는 iPhone/iPad와 분리됩니다. 같은 고객 데이터를 사용하려면 앱의 Google Drive 전체 동기화 또는 선택 복원을 사용합니다. Google OAuth 설정은 같은 Bundle ID와 redirect scheme을 사용하지만 실제 맥 로그인·업로드·복원은 배포 전 별도 계정으로 회귀 시험합니다.
+
 ### 빌드 전 확인
 
 - `MARKETING_VERSION`은 사용자에게 표시할 앱 버전입니다.

@@ -129,12 +129,16 @@ struct GroupSmsCampaignView: View {
     }
 
     private var automationReadiness: GroupSmsAutomationReadiness {
+        #if os(macOS)
+        return .unavailable
+        #else
         let stored = GroupSmsAutomationReadiness(rawValue: automationReadinessRaw) ?? .notInstalled
         if stored == .ready,
            shortcutVerifiedVersion != Self.transportConfiguration.shortcutVersion {
             return .updateRequired
         }
         return stored
+        #endif
     }
 
     private var preflight: GroupSmsPreflightSummary {
@@ -210,6 +214,13 @@ struct GroupSmsCampaignView: View {
                     showingContactPicker = false
                 }
             )
+        }
+        #elseif os(macOS)
+        .sheet(isPresented: $showingContactPicker) {
+            ContactSelectionImportSheet { draft in
+                addContactTargets(draft.contacts)
+                showingContactPicker = false
+            }
         }
         #endif
         .sheet(isPresented: $showingContactGroupPicker) {
@@ -359,7 +370,6 @@ struct GroupSmsCampaignView: View {
             .pickerStyle(.segmented)
 
             HStack(spacing: 10) {
-                #if os(iOS)
                 Button {
                     showingContactPicker = true
                 } label: {
@@ -368,7 +378,6 @@ struct GroupSmsCampaignView: View {
                         .frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(GroupSmsSecondaryButtonStyle())
-                #endif
 
                 Button {
                     showingContactGroupPicker = true

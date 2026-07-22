@@ -13,8 +13,9 @@
    - 우선은 OCR 도구가 만든 CSV를 PWA가 가져오는 방식으로 연결한다.
    - 가능하면 사용자가 PWA 안에서 OCR 기반 import를 자연스럽게 시작할 수 있게 한다.
 4. PWA 병합이 기술적으로 어렵거나 사용자 경험이 부족하면 네이티브 앱으로 전환 개발한다.
-5. 네이티브 앱으로 전환하는 경우 iPhone/iPad 우선 개발 후 Android 확장을 검토한다.
+5. 네이티브 앱으로 전환하는 경우 iPhone/iPad 우선 개발 후 macOS와 Android로 확장한다.
    - iPhone/iPad: VisionKit, Apple Vision
+   - macOS: SwiftUI, Apple Vision, MapKit, Contacts, Google Drive 공용 데이터 동기화
    - Android: ML Kit Document Scanner, ML Kit Text Recognition v2
 6. 네이티브 앱 개발환경과 초기 프로젝트 준비는 `docs/native-app-setup.md`를 기준으로 진행한다.
 
@@ -119,6 +120,12 @@
   - 현재 초안: `native/OutboundSalesCore`, `native/OutboundSalesNative`, `native/OutboundSalesiOS`
   - 완료: 기본 SwiftUI 탭 구조, CSV 텍스트/파일 import, 고객리스트/고객 로컬 JSON 저장, Apple MapKit 지도 탭, 고객 상세/수정, 전화/문자/길찾기, 히스토리, 오늘 스케줄, JSON 백업/복원, 주소 좌표 변환
   - 다음 단계: 실제 기기 QA, 엑셀 파일 import, OCR 실제 사진/문서 선택과 Vision OCR, Google Drive 계정 연동
+- macOS 네이티브 앱
+  - 완료: macOS 15 이상용 SwiftUI 앱 타깃과 전용 사이드바 내비게이션
+  - 완료: 공용 고객 데이터, 기록, 지도, Google Drive, CSV와 다중 이미지 OCR 연결
+  - 완료: macOS 연락처 개별·그룹 가져오기
+  - 다음 단계: Google Drive 로그인 실사용 검증, 사진·음성 메모의 macOS 입출력 QA, Developer ID/App Store 배포 설정
+  - macOS에서는 FaceTime/메시지 연속성만 지원하며 통신사 단체문자 자동 발송은 iPhone 전용으로 유지
 - OCR 기반 고객리스트 인식
   - 스캔 이미지 파일 입력으로 Mac 코어 기능 먼저 검증
   - OCR 결과의 텍스트와 좌표를 이용해 행/열 복원

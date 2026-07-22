@@ -35,6 +35,10 @@ tools/customer-list-ocr-cli/test-data/customer/
 native/**/.build/
 native/**/DerivedData/
 native/.google-drive-oauth.local
+native/**/.swiftpm/
+native/**/*.xcodeproj/project.xcworkspace/
+native/**/*.xcodeproj/xcuserdata/
+native/**/build/
 
 # Group SMS private device-test evidence
 docs/test-results/private/

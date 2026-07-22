@@ -198,6 +198,106 @@ struct ContactPickerSheet: UIViewControllerRepresentable {
 }
 #endif
 
+#if os(macOS)
+struct ContactSelectionImportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var contacts: [ContactImportCustomer] = []
+    @State private var selectedContactIds = Set<String>()
+    @State private var searchText = ""
+    @State private var message = ""
+    @State private var isLoading = false
+    let onImport: (ContactImportDraft) -> Void
+    private let service = ContactImportService()
+
+    private var filteredContacts: [ContactImportCustomer] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return contacts }
+        return contacts.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.phoneNumber.localizedCaseInsensitiveContains(query)
+                || $0.address.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if isLoading {
+                    ProgressView("연락처를 불러오는 중...")
+                } else if contacts.isEmpty {
+                    Text(message.isEmpty ? "가져올 연락처가 없습니다." : message)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Section("연락처 \(selectedContactIds.count)명 선택") {
+                        ForEach(filteredContacts) { contact in
+                            Button {
+                                if selectedContactIds.contains(contact.id) {
+                                    selectedContactIds.remove(contact.id)
+                                } else {
+                                    selectedContactIds.insert(contact.id)
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: selectedContactIds.contains(contact.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedContactIds.contains(contact.id) ? Color.accentColor : Color.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(contact.name.isEmpty ? "이름 없음" : contact.name)
+                                            .font(.headline)
+                                        Text(contact.phoneNumber.isEmpty ? "연락처 없음" : contact.phoneNumber)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "이름, 전화번호 또는 주소")
+            .navigationTitle("개별 연락처 선택")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("전체 해제") { selectedContactIds.removeAll() }
+                        .disabled(selectedContactIds.isEmpty)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("가져오기") {
+                        let selected = contacts.filter { selectedContactIds.contains($0.id) }
+                        onImport(ContactImportDraft(
+                            sourceTitle: "연락처 선택",
+                            defaultListName: "연락처 가져오기",
+                            contacts: selected
+                        ))
+                        dismiss()
+                    }
+                    .disabled(selectedContactIds.isEmpty)
+                }
+            }
+            .task { await loadContacts() }
+        }
+        .frame(minWidth: 620, minHeight: 560)
+    }
+
+    private func loadContacts() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            contacts = try await service.allCustomers()
+            message = ""
+        } catch {
+            contacts = []
+            message = error.localizedDescription
+        }
+    }
+}
+#endif
+
 struct ContactGroupImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var groups: [ContactImportGroup] = []

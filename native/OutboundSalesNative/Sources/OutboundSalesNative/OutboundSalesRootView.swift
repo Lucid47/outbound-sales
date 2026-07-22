@@ -6,12 +6,34 @@ import UIKit
 import AppKit
 #endif
 
-private enum OutboundSalesRootTab: String {
+private enum OutboundSalesRootTab: String, CaseIterable, Identifiable {
     case today
     case customers
     case importData
     case logs
     case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: "오늘"
+        case .customers: "고객"
+        case .importData: "가져오기"
+        case .logs: "기록"
+        case .settings: "설정"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .today: "calendar"
+        case .customers: "person.3"
+        case .importData: "square.and.arrow.down"
+        case .logs: "clock.arrow.circlepath"
+        case .settings: "gearshape"
+        }
+    }
 }
 
 private struct ScheduledGroupSmsPresentation: Identifiable {
@@ -28,6 +50,56 @@ public struct OutboundSalesRootView: View {
     public init() {}
 
     public var body: some View {
+        rootContent
+            .onAppear {
+                // iOS stores the previous six-tab selection even after the tab is removed.
+                if selectedTab == "groupSms" || OutboundSalesRootTab(rawValue: selectedTab) == nil {
+                    selectedTab = OutboundSalesRootTab.today.rawValue
+                }
+            }
+            .task {
+                await state.performStartupMaintenance()
+            }
+            .onOpenURL { url in
+                state.handleGroupSmsCallback(url: url)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .outboundSalesOpenURL)) { notification in
+                guard let url = notification.object as? URL else { return }
+                state.handleGroupSmsCallback(url: url)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .outboundSalesScheduledGroupSmsAction)) { notification in
+                guard let event = notification.object as? GroupSmsScheduleNotificationEvent else { return }
+                selectedTab = OutboundSalesRootTab.customers.rawValue
+                scheduledGroupSmsPresentation = ScheduledGroupSmsPresentation(
+                    campaignId: event.campaignId,
+                    action: event.action
+                )
+            }
+            .sheet(item: $scheduledGroupSmsPresentation) { presentation in
+                ScheduledGroupSmsCampaignView(
+                    campaignId: presentation.campaignId,
+                    initialAction: presentation.action
+                )
+                .environmentObject(state)
+            }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        #if os(macOS)
+        NavigationSplitView {
+            List(OutboundSalesRootTab.allCases, selection: $selectedTab) { tab in
+                Label(tab.title, systemImage: tab.systemImage)
+                    .tag(tab.rawValue)
+                    .padding(.vertical, 4)
+            }
+            .navigationTitle("소희야 가자")
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+        } detail: {
+            selectedRootView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        #else
         TabView(selection: $selectedTab) {
             TodayView()
                 .environmentObject(state)
@@ -54,36 +126,22 @@ public struct OutboundSalesRootView: View {
                 .tabItem { Label("설정", systemImage: "gearshape") }
                 .tag(OutboundSalesRootTab.settings.rawValue)
         }
-        .onAppear {
-            // iOS stores the previous six-tab selection even after the tab is removed.
-            if selectedTab == "groupSms" {
-                selectedTab = OutboundSalesRootTab.customers.rawValue
-            }
-        }
-        .task {
-            await state.performStartupMaintenance()
-        }
-        .onOpenURL { url in
-            state.handleGroupSmsCallback(url: url)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .outboundSalesOpenURL)) { notification in
-            guard let url = notification.object as? URL else { return }
-            state.handleGroupSmsCallback(url: url)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .outboundSalesScheduledGroupSmsAction)) { notification in
-            guard let event = notification.object as? GroupSmsScheduleNotificationEvent else { return }
-            selectedTab = OutboundSalesRootTab.customers.rawValue
-            scheduledGroupSmsPresentation = ScheduledGroupSmsPresentation(
-                campaignId: event.campaignId,
-                action: event.action
-            )
-        }
-        .sheet(item: $scheduledGroupSmsPresentation) { presentation in
-            ScheduledGroupSmsCampaignView(
-                campaignId: presentation.campaignId,
-                initialAction: presentation.action
-            )
-            .environmentObject(state)
+        #endif
+    }
+
+    @ViewBuilder
+    private var selectedRootView: some View {
+        switch OutboundSalesRootTab(rawValue: selectedTab) ?? .today {
+        case .today:
+            TodayView().environmentObject(state)
+        case .customers:
+            CustomersView().environmentObject(state)
+        case .importData:
+            ImportView().environmentObject(state)
+        case .logs:
+            LogsView().environmentObject(state)
+        case .settings:
+            SettingsView().environmentObject(state)
         }
     }
 }

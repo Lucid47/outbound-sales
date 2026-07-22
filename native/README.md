@@ -1,6 +1,6 @@
 # 소희야 가자 Native App
 
-이 폴더는 기존 PWA 기능과 OCR 기능을 iPhone/iPad 네이티브 앱으로 옮기기 위한 작업 공간입니다.
+이 폴더는 기존 PWA 기능과 OCR 기능을 iPhone/iPad/macOS 네이티브 앱으로 옮기기 위한 작업 공간입니다.
 
 ## 필수 기준 문서
 
@@ -37,9 +37,11 @@ native/
     SwiftUI 화면/상태 포팅 패키지
   OutboundSalesiOS/
     iPhone/iPad에서 실행할 Xcode 앱 프로젝트
+  OutboundSalesMac/
+    macOS 15 이상에서 실행할 Xcode 앱 프로젝트
 ```
 
-현재는 기존 PWA 기능을 네이티브 앱으로 옮기기 위해 공통 로직, SwiftUI 화면 모듈, iOS 앱 프로젝트를 분리해 둡니다.
+현재는 기존 PWA 기능을 네이티브 앱으로 옮기기 위해 공통 로직, SwiftUI 화면 모듈, iOS 앱 프로젝트, macOS 앱 프로젝트를 분리해 둡니다.
 
 ## 현재 포팅된 범위
 
@@ -119,6 +121,11 @@ native/
   - 템플릿 문자는 iOS 문자 작성창에 수신번호와 본문을 자동 입력
   - 문자 작성/발송이 불가능한 환경에서는 본문을 클립보드에 복사하고 문자 URL을 여는 fallback 사용
 - iPhone/iPad용 Xcode 앱 프로젝트 초안
+- macOS용 Xcode 앱 프로젝트
+  - 좌측 사이드바 기반 5개 주요 메뉴
+  - CSV/붙여넣기/다중 이미지 OCR 가져오기
+  - macOS 연락처 개별·그룹 가져오기
+  - iOS와 같은 고객·기록·지도·Google Drive 데이터 모델 공유
 - 앱 시작 화면과 SwiftUI 루트 화면 연결
 - 고객리스트/고객 데이터를 앱 전용 JSON 파일로 로컬 저장
 - 앱 재실행 시 저장된 데이터 자동 복원
@@ -145,6 +152,16 @@ xcodebuild -project native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj \
   -scheme OutboundSalesiOS \
   -destination 'generic/platform=iOS' \
   CODE_SIGNING_ALLOWED=NO \
+build
+```
+
+macOS 앱 프로젝트 빌드:
+
+```bash
+xcodebuild -project native/OutboundSalesMac/OutboundSalesMac.xcodeproj \
+  -scheme OutboundSalesMac \
+  -destination 'platform=macOS,arch=arm64' \
+  CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
@@ -163,6 +180,12 @@ open native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj
 ```
 
 Xcode에서 `OutboundSalesiOS` scheme을 선택하면 됩니다. 현재 iOS 시뮬레이터 런타임은 설치되어 있지 않으므로 화면 실행 검증은 실제 기기 연결 또는 시뮬레이터 추가 설치 후 진행합니다.
+
+macOS 앱은 다음 프로젝트를 열고 `OutboundSalesMac` scheme에서 `My Mac`을 선택해 실행합니다.
+
+```bash
+open native/OutboundSalesMac/OutboundSalesMac.xcodeproj
+```
 
 ## Group SMS 개발 기준
 

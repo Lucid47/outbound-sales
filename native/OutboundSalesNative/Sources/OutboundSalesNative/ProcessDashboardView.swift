@@ -50,8 +50,7 @@ struct ProcessDashboardView: View {
                     .padding(.bottom, 8)
                 }
             }
-            .toolbar(isLandscape ? .hidden : .visible, for: .navigationBar)
-            .statusBarHidden(isLandscape)
+            .modifier(DashboardLandscapeChromeModifier(isLandscape: isLandscape))
         }
         .background(AppPalette.pageBackground)
         .navigationTitle("고객 프로세스")
@@ -248,6 +247,20 @@ struct ProcessDashboardView: View {
     private func elapsedDays(for customer: Customer) -> Int? {
         guard let latest = state.latestTouchDate(for: customer) else { return nil }
         return max(0, Calendar.current.dateComponents([.day], from: latest, to: Date()).day ?? 0)
+    }
+}
+
+private struct DashboardLandscapeChromeModifier: ViewModifier {
+    let isLandscape: Bool
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content
+            .toolbar(isLandscape ? .hidden : .visible, for: .navigationBar)
+            .statusBarHidden(isLandscape)
+        #else
+        content
+        #endif
     }
 }
 
