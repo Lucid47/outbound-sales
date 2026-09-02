@@ -30,8 +30,8 @@ android {
         applicationId = "com.lucid47.soheeyagaja"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.9.0"
+        versionCode = 11
+        versionName = "0.9.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = googleMapsApiKey

@@ -11,6 +11,12 @@ interface ActivityDao {
     @Insert
     suspend fun insertContactLog(log: ContactLogEntity): Long
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM contact_logs WHERE customerId = :customerId " +
+            "AND type = :type AND createdAtEpochMillis = :occurredAt)",
+    )
+    suspend fun hasImportedCall(customerId: Long, type: String, occurredAt: Long): Boolean
+
     @Insert
     suspend fun insertVisitLog(log: VisitLogEntity): Long
 

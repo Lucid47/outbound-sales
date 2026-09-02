@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lucid47.soheeyagaja.activities.ActivityRepository
+import com.lucid47.soheeyagaja.callhistory.CallHistoryImportRepository
 import com.lucid47.soheeyagaja.dashboard.DashboardPaletteFamily
 import com.lucid47.soheeyagaja.dashboard.DashboardRepository
 import com.lucid47.soheeyagaja.contacts.AndroidContactService
@@ -63,6 +64,12 @@ data class MemoEditorState(
 
 fun historyTitle(entry: HistoryEntryRecord): String = when (entry.type) {
     ActivityRepository.TYPE_CALL -> "전화 시도"
+    ActivityRepository.TYPE_CALL_INCOMING -> "수신 통화"
+    ActivityRepository.TYPE_CALL_OUTGOING -> "발신 통화"
+    ActivityRepository.TYPE_CALL_MISSED -> "부재중 전화"
+    ActivityRepository.TYPE_CALL_REJECTED -> "수신 거절"
+    ActivityRepository.TYPE_CALL_BLOCKED -> "차단된 전화"
+    ActivityRepository.TYPE_CALL_OTHER -> "통화 기록"
     ActivityRepository.TYPE_MANUAL_SMS -> "문자 시도"
     ActivityRepository.TYPE_NOTE -> "텍스트 메모"
     ActivityRepository.TYPE_STATUS_COMPLETE -> "완료 처리"
@@ -96,6 +103,8 @@ data class CustomerManagementUiState(
     val dashboardSettingsVisible: Boolean = false,
     val contactToolsVisible: Boolean = false,
     val backupToolsVisible: Boolean = false,
+    val callHistoryToolsVisible: Boolean = false,
+    val callHistoryBusy: Boolean = false,
     val groupMessageVisible: Boolean = false,
     val contactPrefixEnabled: Boolean = true,
     val contactPrefix: String = "#",
@@ -116,6 +125,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val database = AppDatabase.get(application)
     private val repository = CustomerManagementRepository(database)
     private val activityRepository = ActivityRepository(database)
+    private val callHistoryRepository = CallHistoryImportRepository(application, database)
     private val dashboardRepository = DashboardRepository(database)
     private val contactService = AndroidContactService(application)
     private val locationRepository = CustomerLocationRepository(application, database)
@@ -645,6 +655,65 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
 
     fun closeBackupTools() {
         _uiState.update { it.copy(backupToolsVisible = false) }
+    }
+
+    fun openCallHistoryTools() {
+        if (_uiState.value.selectedListId == null) {
+            showError(IllegalStateException("통화기록을 연결할 고객리스트를 먼저 선택해주세요."))
+            return
+        }
+        _uiState.update { it.copy(callHistoryToolsVisible = true) }
+    }
+
+    fun closeCallHistoryTools() {
+        if (_uiState.value.callHistoryBusy) return
+        _uiState.update { it.copy(callHistoryToolsVisible = false) }
+    }
+
+    fun importDeviceCallHistory(days: Int?) {
+        val listId = _uiState.value.selectedListId ?: return
+        _uiState.update { it.copy(callHistoryBusy = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching { callHistoryRepository.importDeviceCalls(listId, days) }
+                .onSuccess { result ->
+                    _uiState.update {
+                        it.copy(callHistoryBusy = false, statusMessage = result.summary(), errorMessage = null)
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            callHistoryBusy = false,
+                            errorMessage = error.message ?: "통화기록을 가져오지 못했습니다.",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun callHistoryPermissionDenied() {
+        _uiState.update { it.copy(errorMessage = "통화기록 권한이 없어 직접 가져오기를 실행하지 못했습니다.") }
+    }
+
+    fun importCallHistoryCsv(uri: Uri) {
+        val listId = _uiState.value.selectedListId ?: return
+        _uiState.update { it.copy(callHistoryBusy = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching { callHistoryRepository.importCsv(listId, uri) }
+                .onSuccess { result ->
+                    _uiState.update {
+                        it.copy(callHistoryBusy = false, statusMessage = result.summary(), errorMessage = null)
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            callHistoryBusy = false,
+                            errorMessage = error.message ?: "통화기록 CSV를 가져오지 못했습니다.",
+                        )
+                    }
+                }
+        }
     }
 
     fun openGroupMessage() {

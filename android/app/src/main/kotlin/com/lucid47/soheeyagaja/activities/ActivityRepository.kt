@@ -155,11 +155,18 @@ class ActivityRepository(private val database: AppDatabase) {
         const val TYPE_NOTE = "NOTE"
         const val TYPE_STATUS_COMPLETE = "STATUS_COMPLETE"
         const val TYPE_STATUS_REOPEN = "STATUS_REOPEN"
+        const val TYPE_CALL_INCOMING = "CALL_INCOMING"
+        const val TYPE_CALL_OUTGOING = "CALL_OUTGOING"
+        const val TYPE_CALL_MISSED = "CALL_MISSED"
+        const val TYPE_CALL_REJECTED = "CALL_REJECTED"
+        const val TYPE_CALL_BLOCKED = "CALL_BLOCKED"
+        const val TYPE_CALL_OTHER = "CALL_OTHER"
 
         const val RESULT_OPENED = "OPENED"
         const val RESULT_COMPLETED = "COMPLETED"
         const val RESULT_REOPENED = "REOPENED"
         const val RESULT_SAVED = "SAVED"
+        const val RESULT_IMPORTED = "IMPORTED"
 
         const val VISIT_QUICK = "QUICK_LOCATION"
         const val VISIT_TEXT_MEMO = "TEXT_MEMO"

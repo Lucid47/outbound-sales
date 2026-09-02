@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.UploadFile
@@ -67,6 +68,7 @@ import androidx.core.content.ContextCompat
 import com.lucid47.soheeyagaja.contacts.ContactImportDialog
 import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
 import com.lucid47.soheeyagaja.contacts.ContactToolsDialog
+import com.lucid47.soheeyagaja.callhistory.CallHistoryToolsDialog
 import com.lucid47.soheeyagaja.backup.BackupToolsDialog
 import com.lucid47.soheeyagaja.activities.HistoryActivityScreen
 import com.lucid47.soheeyagaja.activities.TodayActivityScreen
@@ -191,7 +193,7 @@ private fun SettingsSummaryScreen(
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.8.0")
+                        Text("소희야 가자 Android 0.9.1")
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }
@@ -202,6 +204,14 @@ private fun SettingsSummaryScreen(
                     Icon(Icons.Default.Contacts, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
                     Text("연락처 내보내기 및 정리")
+                }
+            }
+            item {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = viewModel::openCallHistoryTools, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                    Icon(Icons.Default.Phone, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("통화기록 가져오기")
                 }
             }
             item {
@@ -219,6 +229,9 @@ private fun SettingsSummaryScreen(
     }
     if (state.backupToolsVisible) {
         BackupToolsDialog(customerLists = lists, onDismiss = viewModel::closeBackupTools)
+    }
+    if (state.callHistoryToolsVisible) {
+        CallHistoryToolsDialog(viewModel = viewModel, customerLists = lists, onDismiss = viewModel::closeCallHistoryTools)
     }
 }
 

@@ -36,6 +36,9 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE id = :customerId")
     suspend fun getById(customerId: Long): CustomerEntity?
 
+    @Query("SELECT * FROM customers WHERE listId = :listId ORDER BY sourceRow")
+    suspend fun getByList(listId: Long): List<CustomerEntity>
+
     @Query("SELECT COALESCE(MAX(sourceRow), 0) FROM customers WHERE listId = :listId")
     suspend fun maxSourceRow(listId: Long): Long
 
