@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lucid47.soheeyagaja.activities.ActivityRepository
+import com.lucid47.soheeyagaja.dashboard.DashboardPaletteFamily
+import com.lucid47.soheeyagaja.dashboard.DashboardRepository
 import com.lucid47.soheeyagaja.data.AppDatabase
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
@@ -56,6 +58,7 @@ fun historyTitle(entry: HistoryEntryRecord): String = when (entry.type) {
     ActivityRepository.TYPE_NOTE -> "텍스트 메모"
     ActivityRepository.TYPE_STATUS_COMPLETE -> "완료 처리"
     ActivityRepository.TYPE_STATUS_REOPEN -> "완료 취소"
+    "PROCESS_STATUS" -> "프로세스 변경"
     ActivityRepository.VISIT_QUICK -> "방문"
     ActivityRepository.VISIT_TEXT_MEMO -> "텍스트 메모"
     else -> "고객 터치"
@@ -78,6 +81,8 @@ data class CustomerManagementUiState(
     val historyDateFilterEnabled: Boolean = false,
     val historyStartEpochDay: Long = LocalDate.now().minusDays(30).toEpochDay(),
     val historyEndEpochDay: Long = LocalDate.now().toEpochDay(),
+    val dashboardVisible: Boolean = false,
+    val dashboardSettingsVisible: Boolean = false,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
 )
@@ -87,6 +92,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val database = AppDatabase.get(application)
     private val repository = CustomerManagementRepository(database)
     private val activityRepository = ActivityRepository(database)
+    private val dashboardRepository = DashboardRepository(database)
     private val _uiState = MutableStateFlow(CustomerManagementUiState())
     val uiState = _uiState
 
@@ -94,6 +100,18 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
+    )
+
+    val dashboardStatuses = dashboardRepository.observeStatuses().stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        emptyList(),
+    )
+
+    val dashboardSettings = dashboardRepository.observeSettings().stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        null,
     )
 
     private val selectedListCustomers = _uiState
@@ -202,6 +220,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
+        viewModelScope.launch { dashboardRepository.ensureDefaults() }
         viewModelScope.launch {
             customerLists.collect { lists ->
                 _uiState.update { state ->
@@ -512,6 +531,52 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
 
     fun closeHistoryCustomer() {
         _uiState.update { it.copy(historyCustomerId = null) }
+    }
+
+    fun openDashboard() {
+        _uiState.update { it.copy(dashboardVisible = true) }
+    }
+
+    fun closeDashboard() {
+        _uiState.update { it.copy(dashboardVisible = false, dashboardSettingsVisible = false) }
+    }
+
+    fun openDashboardSettings() {
+        _uiState.update { it.copy(dashboardSettingsVisible = true) }
+    }
+
+    fun closeDashboardSettings() {
+        _uiState.update { it.copy(dashboardSettingsVisible = false) }
+    }
+
+    fun setDashboardStatus(customerId: Long, statusId: String) {
+        launchActivityAction("고객 프로세스를 변경했습니다.") {
+            dashboardRepository.setCustomerStatus(customerId, statusId)
+        }
+    }
+
+    fun setDashboardStatusCount(count: Int) {
+        launchActivityAction("프로세스 단계를 ${count.coerceIn(1, 10)}개로 변경했습니다.") {
+            dashboardRepository.setStatusCount(count)
+        }
+    }
+
+    fun renameDashboardStatus(statusId: String, name: String) {
+        viewModelScope.launch {
+            runCatching { dashboardRepository.renameStatus(statusId, name) }.onFailure(::showError)
+        }
+    }
+
+    fun setDashboardPalette(family: DashboardPaletteFamily) {
+        launchActivityAction("히트맵 색상 계열을 변경했습니다.") {
+            dashboardRepository.setPalette(family)
+        }
+    }
+
+    fun setDashboardLegendVisible(visible: Boolean) {
+        viewModelScope.launch {
+            runCatching { dashboardRepository.setLegendVisible(visible) }.onFailure(::showError)
+        }
     }
 
     fun clearMessage() {

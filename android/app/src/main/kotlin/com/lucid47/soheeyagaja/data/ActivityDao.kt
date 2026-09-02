@@ -94,6 +94,20 @@ interface ActivityDao {
         FROM visit_logs
         INNER JOIN customers ON customers.id = visit_logs.customerId
         WHERE visit_logs.listId = :listId
+        UNION ALL
+        SELECT 'process-' || process_status_logs.id AS stableId,
+               process_status_logs.listId AS listId,
+               process_status_logs.customerId AS customerId,
+               customers.name AS customerName,
+               'PROCESS' AS category,
+               'PROCESS_STATUS' AS type,
+               'CHANGED' AS result,
+               COALESCE(process_status_logs.previousStatusName, '상태 없음') ||
+                   ' → ' || process_status_logs.nextStatusName AS detail,
+               process_status_logs.createdAtEpochMillis AS occurredAtEpochMillis
+        FROM process_status_logs
+        INNER JOIN customers ON customers.id = process_status_logs.customerId
+        WHERE process_status_logs.listId = :listId
         ORDER BY occurredAtEpochMillis DESC
         """,
     )
@@ -131,6 +145,20 @@ interface ActivityDao {
         FROM visit_logs
         INNER JOIN customers ON customers.id = visit_logs.customerId
         WHERE visit_logs.customerId = :customerId
+        UNION ALL
+        SELECT 'process-' || process_status_logs.id AS stableId,
+               process_status_logs.listId AS listId,
+               process_status_logs.customerId AS customerId,
+               customers.name AS customerName,
+               'PROCESS' AS category,
+               'PROCESS_STATUS' AS type,
+               'CHANGED' AS result,
+               COALESCE(process_status_logs.previousStatusName, '상태 없음') ||
+                   ' → ' || process_status_logs.nextStatusName AS detail,
+               process_status_logs.createdAtEpochMillis AS occurredAtEpochMillis
+        FROM process_status_logs
+        INNER JOIN customers ON customers.id = process_status_logs.customerId
+        WHERE process_status_logs.customerId = :customerId
         ORDER BY occurredAtEpochMillis DESC
         """,
     )
@@ -144,4 +172,7 @@ interface ActivityDao {
 
     @Query("SELECT COUNT(*) FROM visit_schedule_items WHERE customerId = :customerId")
     suspend fun countScheduleItems(customerId: Long): Long
+
+    @Query("SELECT COUNT(*) FROM process_status_logs WHERE customerId = :customerId")
+    suspend fun countProcessLogs(customerId: Long): Long
 }

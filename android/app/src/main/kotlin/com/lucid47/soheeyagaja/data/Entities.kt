@@ -46,11 +46,53 @@ data class CustomerEntity(
     val birthDate: String = "",
     val notes: String,
     val status: String = "OPEN",
+    val dashboardStatusId: String? = null,
     val contactIdentifier: String? = null,
     val contactRegisteredName: String? = null,
     val duplicateKey: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long = createdAtEpochMillis,
+)
+
+@Entity(tableName = "dashboard_statuses", indices = [Index(value = ["orderIndex"], unique = true)])
+data class DashboardStatusEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val colorHex: String,
+    val orderIndex: Int,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(tableName = "dashboard_settings")
+data class DashboardSettingsEntity(
+    @PrimaryKey val id: Int = 1,
+    val statusCount: Int = 5,
+    val paletteFamily: String = "BLUE",
+    val showsLegend: Boolean = true,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(
+    tableName = "process_status_logs",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("customerId"), Index("listId"), Index("createdAtEpochMillis")],
+)
+data class ProcessStatusLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val listId: Long,
+    val customerId: Long,
+    val previousStatusId: String?,
+    val previousStatusName: String?,
+    val nextStatusId: String,
+    val nextStatusName: String,
+    val createdAtEpochMillis: Long,
 )
 
 @Entity(

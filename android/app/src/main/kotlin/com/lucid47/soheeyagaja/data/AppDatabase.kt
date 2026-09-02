@@ -16,14 +16,18 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         VisitLogEntity::class,
         VisitScheduleEntity::class,
         VisitScheduleItemEntity::class,
+        DashboardStatusEntity::class,
+        DashboardSettingsEntity::class,
+        ProcessStatusLogEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun customerDao(): CustomerDao
     abstract fun customerListDao(): CustomerListDao
     abstract fun activityDao(): ActivityDao
+    abstract fun dashboardDao(): DashboardDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -33,7 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "soheeya-gaja.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }
@@ -177,6 +181,84 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS index_visit_schedule_items_scheduleId_customerId " +
                         "ON visit_schedule_items (scheduleId, customerId)",
+                )
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE customers ADD COLUMN dashboardStatusId TEXT")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS dashboard_statuses (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        colorHex TEXT NOT NULL,
+                        orderIndex INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_dashboard_statuses_orderIndex " +
+                        "ON dashboard_statuses (orderIndex)",
+                )
+                listOf(
+                    Triple("dashboard-status-1", "신규", "DCEBFF"),
+                    Triple("dashboard-status-2", "연락 대기", "B6D4FE"),
+                    Triple("dashboard-status-3", "상담 진행", "84B6F4"),
+                    Triple("dashboard-status-4", "후속 관리", "4F8FE8"),
+                    Triple("dashboard-status-5", "완료", "1E5FBF"),
+                ).forEachIndexed { index, (id, name, color) ->
+                    db.execSQL(
+                        "INSERT INTO dashboard_statuses " +
+                            "(id, name, colorHex, orderIndex, updatedAtEpochMillis) VALUES (?, ?, ?, ?, 0)",
+                        arrayOf<Any>(id, name, color, index),
+                    )
+                }
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS dashboard_settings (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        statusCount INTEGER NOT NULL,
+                        paletteFamily TEXT NOT NULL,
+                        showsLegend INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "INSERT INTO dashboard_settings " +
+                        "(id, statusCount, paletteFamily, showsLegend, updatedAtEpochMillis) " +
+                        "VALUES (1, 5, 'BLUE', 1, 0)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS process_status_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        listId INTEGER NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        previousStatusId TEXT,
+                        previousStatusName TEXT,
+                        nextStatusId TEXT NOT NULL,
+                        nextStatusName TEXT NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        FOREIGN KEY(customerId) REFERENCES customers(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_process_status_logs_customerId " +
+                        "ON process_status_logs (customerId)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_process_status_logs_listId " +
+                        "ON process_status_logs (listId)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_process_status_logs_createdAtEpochMillis " +
+                        "ON process_status_logs (createdAtEpochMillis)",
                 )
             }
         }

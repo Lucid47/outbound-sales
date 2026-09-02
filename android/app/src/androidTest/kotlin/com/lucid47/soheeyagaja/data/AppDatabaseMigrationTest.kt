@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
     @Test
-    fun migrationOneToFourPreservesDataAndAddsActivitySchema() {
+    fun migrationOneToFivePreservesDataAndAddsDashboardSchema() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TEST_DATABASE)
         val legacy = FrameworkSQLiteOpenHelperFactory().create(
@@ -39,6 +39,7 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_1_2,
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
             )
             .build()
         migrated.openHelper.writableDatabase
@@ -62,6 +63,7 @@ class AppDatabaseMigrationTest {
         assertTrue("birthDate" in columnNames)
         assertTrue("status" in columnNames)
         assertTrue("updatedAtEpochMillis" in columnNames)
+        assertTrue("dashboardStatusId" in columnNames)
         val customFieldsTable = migrated.openHelper.readableDatabase.query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_custom_fields'",
         )
@@ -71,6 +73,17 @@ class AppDatabaseMigrationTest {
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'",
             )
             tableCursor.use { assertTrue("$table 테이블이 필요합니다.", it.moveToFirst()) }
+        }
+        listOf("dashboard_statuses", "dashboard_settings", "process_status_logs").forEach { table ->
+            val tableCursor = migrated.openHelper.readableDatabase.query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'",
+            )
+            tableCursor.use { assertTrue("$table 테이블이 필요합니다.", it.moveToFirst()) }
+        }
+        val statuses = migrated.openHelper.readableDatabase.query("SELECT COUNT(*) FROM dashboard_statuses")
+        statuses.use {
+            assertTrue(it.moveToFirst())
+            assertEquals(5, it.getInt(0))
         }
         migrated.close()
         context.deleteDatabase(TEST_DATABASE)

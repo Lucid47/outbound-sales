@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Person
@@ -79,6 +80,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
 import com.lucid47.soheeyagaja.data.HistoryEntryRecord
+import com.lucid47.soheeyagaja.dashboard.ProcessDashboardDialog
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -103,6 +105,12 @@ fun CustomerManagementScreen(
             TopAppBar(
                 title = { Text("고객", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(
+                        onClick = viewModel::openDashboard,
+                        enabled = selectedList != null,
+                    ) {
+                        Icon(Icons.Default.GridView, contentDescription = "프로세스 히트맵")
+                    }
                     IconButton(
                         onClick = viewModel::openCreateCustomer,
                         enabled = selectedList != null,
@@ -200,6 +208,10 @@ fun CustomerManagementScreen(
             onDraftChange = viewModel::updateDraft,
             onSave = viewModel::saveCustomer,
         )
+    }
+
+    if (uiState.dashboardVisible) {
+        ProcessDashboardDialog(viewModel = viewModel, onDismiss = viewModel::closeDashboard)
     }
 
     uiState.renameListId?.let {
