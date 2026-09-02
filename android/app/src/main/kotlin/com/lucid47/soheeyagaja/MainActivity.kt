@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,6 +67,7 @@ import androidx.core.content.ContextCompat
 import com.lucid47.soheeyagaja.contacts.ContactImportDialog
 import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
 import com.lucid47.soheeyagaja.contacts.ContactToolsDialog
+import com.lucid47.soheeyagaja.backup.BackupToolsDialog
 import com.lucid47.soheeyagaja.activities.HistoryActivityScreen
 import com.lucid47.soheeyagaja.activities.TodayActivityScreen
 import com.lucid47.soheeyagaja.data.CustomerListSummary
@@ -189,7 +191,7 @@ private fun SettingsSummaryScreen(
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.6.0")
+                        Text("소희야 가자 Android 0.7.0")
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }
@@ -202,10 +204,21 @@ private fun SettingsSummaryScreen(
                     Text("연락처 내보내기 및 정리")
                 }
             }
+            item {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = viewModel::openBackupTools, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                    Icon(Icons.Default.CloudSync, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Google Drive / 파일 백업 및 복원")
+                }
+            }
         }
     }
     if (state.contactToolsVisible) {
         ContactToolsDialog(viewModel = viewModel, customerLists = lists, onDismiss = viewModel::closeContactTools)
+    }
+    if (state.backupToolsVisible) {
+        BackupToolsDialog(customerLists = lists, onDismiss = viewModel::closeBackupTools)
     }
 }
 

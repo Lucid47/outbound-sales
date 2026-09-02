@@ -94,6 +94,7 @@ data class CustomerManagementUiState(
     val dashboardVisible: Boolean = false,
     val dashboardSettingsVisible: Boolean = false,
     val contactToolsVisible: Boolean = false,
+    val backupToolsVisible: Boolean = false,
     val contactPrefixEnabled: Boolean = true,
     val contactPrefix: String = "#",
     val managedContactGroups: List<ManagedContactGroup> = emptyList(),
@@ -624,6 +625,14 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
 
     fun closeContactTools() {
         _uiState.update { it.copy(contactToolsVisible = false, deleteManagedGroupId = null) }
+    }
+
+    fun openBackupTools() {
+        _uiState.update { it.copy(backupToolsVisible = true) }
+    }
+
+    fun closeBackupTools() {
+        _uiState.update { it.copy(backupToolsVisible = false) }
     }
 
     fun setContactPrefixEnabled(enabled: Boolean) {
