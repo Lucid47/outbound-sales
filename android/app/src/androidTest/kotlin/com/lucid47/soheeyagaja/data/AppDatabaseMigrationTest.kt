@@ -8,13 +8,14 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
     @Test
-    fun migrationOneToTwoPreservesListsAndAddsContactColumns() {
+    fun migrationOneToThreePreservesDataAndAddsCustomerManagementSchema() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TEST_DATABASE)
         val legacy = FrameworkSQLiteOpenHelperFactory().create(
@@ -34,7 +35,7 @@ class AppDatabaseMigrationTest {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, TEST_DATABASE)
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
         migrated.openHelper.writableDatabase
 
@@ -47,6 +48,20 @@ class AppDatabaseMigrationTest {
             assertEquals(12345L, it.getLong(1))
             assertEquals(12345L, it.getLong(2))
         }
+        val customerColumns = migrated.openHelper.readableDatabase.query("PRAGMA table_info(customers)")
+        val columnNames = buildSet {
+            customerColumns.use {
+                val nameIndex = it.getColumnIndexOrThrow("name")
+                while (it.moveToNext()) add(it.getString(nameIndex))
+            }
+        }
+        assertTrue("birthDate" in columnNames)
+        assertTrue("status" in columnNames)
+        assertTrue("updatedAtEpochMillis" in columnNames)
+        val customFieldsTable = migrated.openHelper.readableDatabase.query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_custom_fields'",
+        )
+        customFieldsTable.use { assertTrue(it.moveToFirst()) }
         migrated.close()
         context.deleteDatabase(TEST_DATABASE)
     }

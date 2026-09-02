@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,9 +25,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +40,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -42,10 +49,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -57,17 +66,23 @@ import androidx.core.content.ContextCompat
 import com.lucid47.soheeyagaja.contacts.ContactImportDialog
 import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
 import com.lucid47.soheeyagaja.data.CustomerListSummary
+import com.lucid47.soheeyagaja.customers.CustomerManagementScreen
+import com.lucid47.soheeyagaja.customers.CustomerManagementViewModel
 import com.lucid47.soheeyagaja.importing.ContactImportStep
 import com.lucid47.soheeyagaja.importing.ContactImportUiState
 import com.lucid47.soheeyagaja.importing.ImportUiState
 import com.lucid47.soheeyagaja.importing.ImportViewModel
 import com.lucid47.soheeyagaja.ui.theme.SoheeyaGajaTheme
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val importViewModel: ImportViewModel by viewModels()
+    private val customerViewModel: CustomerManagementViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,15 +92,173 @@ class MainActivity : ComponentActivity() {
                 val uiState by importViewModel.uiState.collectAsStateWithLifecycle()
                 val contactUiState by importViewModel.contactUiState.collectAsStateWithLifecycle()
                 val customerLists by importViewModel.customerLists.collectAsStateWithLifecycle()
-                CustomerImportScreen(
-                    viewModel = importViewModel,
-                    uiState = uiState,
+                SoheeyaGajaApp(
+                    importViewModel = importViewModel,
+                    customerViewModel = customerViewModel,
+                    importUiState = uiState,
                     contactUiState = contactUiState,
                     customerLists = customerLists,
-                    onFileSelected = importViewModel::selectFile,
-                    onListNameChanged = importViewModel::updateListName,
-                    onImport = importViewModel::importSelectedFile,
                 )
+            }
+        }
+    }
+}
+
+private enum class RootTab(
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+) {
+    TODAY("오늘", Icons.Default.CalendarMonth),
+    CUSTOMERS("고객", Icons.Default.People),
+    IMPORT("가져오기", Icons.Default.Download),
+    HISTORY("기록", Icons.Default.History),
+    SETTINGS("설정", Icons.Default.Settings),
+}
+
+@Composable
+private fun SoheeyaGajaApp(
+    importViewModel: ImportViewModel,
+    customerViewModel: CustomerManagementViewModel,
+    importUiState: ImportUiState,
+    contactUiState: ContactImportUiState,
+    customerLists: List<CustomerListSummary>,
+) {
+    var selectedTab by rememberSaveable { mutableStateOf(RootTab.TODAY) }
+    val managementLists by customerViewModel.customerLists.collectAsStateWithLifecycle()
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                RootTab.entries.forEach { tab ->
+                    NavigationBarItem(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        label = { Text(tab.label) },
+                    )
+                }
+            }
+        },
+    ) { rootPadding ->
+        val modifier = Modifier.fillMaxSize().padding(rootPadding)
+        when (selectedTab) {
+            RootTab.TODAY -> TodaySummaryScreen(managementLists, modifier)
+            RootTab.CUSTOMERS -> CustomerManagementScreen(customerViewModel, modifier)
+            RootTab.IMPORT -> CustomerImportScreen(
+                viewModel = importViewModel,
+                uiState = importUiState,
+                contactUiState = contactUiState,
+                customerLists = customerLists,
+                onFileSelected = importViewModel::selectFile,
+                onListNameChanged = importViewModel::updateListName,
+                onImport = importViewModel::importSelectedFile,
+                modifier = modifier,
+            )
+            RootTab.HISTORY -> EmptyRootScreen("기록", "기록 없음", Icons.Default.History, modifier)
+            RootTab.SETTINGS -> SettingsSummaryScreen(managementLists, modifier)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TodaySummaryScreen(lists: List<CustomerListSummary>, modifier: Modifier) {
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = LocalDateTime.now()
+            delay(1_000)
+        }
+    }
+    val customerCount = lists.sumOf(CustomerListSummary::customerCount)
+    Scaffold(
+        modifier = modifier,
+        topBar = { TopAppBar(title = { Text("오늘", fontWeight = FontWeight.Bold) }) },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = padding.calculateTopPadding() + 12.dp,
+                end = 16.dp,
+                bottom = padding.calculateBottomPadding() + 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Text(
+                    TODAY_DATE_FORMATTER.format(now),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    TODAY_TIME_FORMATTER.format(now),
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            item {
+                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(18.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        SummaryMetric("고객리스트", lists.size.toLong())
+                        SummaryMetric("전체 고객", customerCount)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryMetric(label: String, value: Long) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("$value", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EmptyRootScreen(
+    title: String,
+    message: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier,
+) {
+    Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text(title, fontWeight = FontWeight.Bold) }) }) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(48.dp))
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSummaryScreen(lists: List<CustomerListSummary>, modifier: Modifier) {
+    Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text("설정", fontWeight = FontWeight.Bold) }) }) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = padding.calculateTopPadding() + 12.dp,
+                end = 16.dp,
+                bottom = padding.calculateBottomPadding() + 24.dp,
+            ),
+        ) {
+            item {
+                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("소희야 가자 Android 0.2.0")
+                        Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
+                    }
+                }
             }
         }
     }
@@ -101,6 +274,7 @@ private fun CustomerImportScreen(
     onFileSelected: (android.net.Uri) -> Unit,
     onListNameChanged: (String) -> Unit,
     onImport: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     var pendingContactRequest by remember { mutableStateOf<ContactPermissionRequest?>(null) }
@@ -139,6 +313,7 @@ private fun CustomerImportScreen(
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = {
@@ -384,6 +559,8 @@ private fun formatDate(epochMillis: Long): String = DATE_FORMATTER.format(
 )
 
 private val DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm")
+private val TODAY_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy년 M월 d일 EEEE", Locale.KOREAN)
+private val TODAY_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
 
 private enum class ContactPermissionRequest {
     CONTACTS,
