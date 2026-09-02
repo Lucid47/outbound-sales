@@ -191,7 +191,7 @@ private fun SettingsSummaryScreen(
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.7.0")
+                        Text("소희야 가자 Android 0.8.0")
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }

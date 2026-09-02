@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
@@ -93,6 +94,7 @@ import com.lucid47.soheeyagaja.location.CustomerMapDialog
 import com.lucid47.soheeyagaja.media.AudioMemoDialog
 import com.lucid47.soheeyagaja.media.HistoryMediaPreview
 import com.lucid47.soheeyagaja.media.PhotoMemoDialog
+import com.lucid47.soheeyagaja.messaging.GroupMessageDialog
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -136,6 +138,12 @@ fun CustomerManagementScreen(
             TopAppBar(
                 title = { Text("고객", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(
+                        onClick = viewModel::openGroupMessage,
+                        enabled = selectedList != null,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "단체문자")
+                    }
                     IconButton(
                         onClick = viewModel::openCustomerMap,
                         enabled = selectedList != null,
@@ -255,6 +263,10 @@ fun CustomerManagementScreen(
 
     if (uiState.mapVisible) {
         CustomerMapDialog(viewModel = viewModel, onDismiss = viewModel::closeCustomerMap)
+    }
+
+    if (uiState.groupMessageVisible) {
+        GroupMessageDialog(viewModel = viewModel, onDismiss = viewModel::closeGroupMessage)
     }
 
     uiState.photoMemoCustomerId?.let { customerId ->
