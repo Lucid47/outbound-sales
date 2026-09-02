@@ -1,5 +1,7 @@
 package com.lucid47.soheeyagaja
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -41,13 +43,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.ContextCompat
+import com.lucid47.soheeyagaja.contacts.ContactImportDialog
+import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
 import com.lucid47.soheeyagaja.data.CustomerListSummary
+import com.lucid47.soheeyagaja.importing.ContactImportStep
+import com.lucid47.soheeyagaja.importing.ContactImportUiState
 import com.lucid47.soheeyagaja.importing.ImportUiState
 import com.lucid47.soheeyagaja.importing.ImportViewModel
 import com.lucid47.soheeyagaja.ui.theme.SoheeyaGajaTheme
@@ -64,9 +75,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             SoheeyaGajaTheme {
                 val uiState by importViewModel.uiState.collectAsStateWithLifecycle()
+                val contactUiState by importViewModel.contactUiState.collectAsStateWithLifecycle()
                 val customerLists by importViewModel.customerLists.collectAsStateWithLifecycle()
                 CustomerImportScreen(
+                    viewModel = importViewModel,
                     uiState = uiState,
+                    contactUiState = contactUiState,
                     customerLists = customerLists,
                     onFileSelected = importViewModel::selectFile,
                     onListNameChanged = importViewModel::updateListName,
@@ -80,14 +94,48 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CustomerImportScreen(
+    viewModel: ImportViewModel,
     uiState: ImportUiState,
+    contactUiState: ContactImportUiState,
     customerLists: List<CustomerListSummary>,
     onFileSelected: (android.net.Uri) -> Unit,
     onListNameChanged: (String) -> Unit,
     onImport: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var pendingContactRequest by remember { mutableStateOf<ContactPermissionRequest?>(null) }
+    val contactPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val request = pendingContactRequest
+        pendingContactRequest = null
+        if (granted) {
+            when (request) {
+                ContactPermissionRequest.CONTACTS -> viewModel.openContactSelection()
+                ContactPermissionRequest.GROUPS -> viewModel.openGroupSelection()
+                null -> Unit
+            }
+        } else {
+            viewModel.contactPermissionDenied()
+        }
+    }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) onFileSelected(uri)
+    }
+
+    fun requestContacts(type: ContactPermissionRequest) {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            when (type) {
+                ContactPermissionRequest.CONTACTS -> viewModel.openContactSelection()
+                ContactPermissionRequest.GROUPS -> viewModel.openGroupSelection()
+            }
+        } else {
+            pendingContactRequest = type
+            contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
     }
 
     Scaffold(
@@ -113,6 +161,15 @@ private fun CustomerImportScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            item {
+                ContactImportSourcePanel(
+                    state = contactUiState,
+                    enabled = !uiState.isImporting && !contactUiState.isLoading,
+                    onSelectContacts = { requestContacts(ContactPermissionRequest.CONTACTS) },
+                    onSelectGroups = { requestContacts(ContactPermissionRequest.GROUPS) },
+                )
+            }
+
             item {
                 ImportPanel(
                     uiState = uiState,
@@ -156,6 +213,25 @@ private fun CustomerImportScreen(
             }
         }
     }
+
+    if (contactUiState.step != ContactImportStep.CLOSED) {
+        ContactImportDialog(
+            state = contactUiState,
+            customerLists = customerLists,
+            onDismiss = viewModel::closeContactImport,
+            onSearchChange = viewModel::updateContactSearch,
+            onToggleContact = viewModel::toggleContact,
+            onSelectContacts = viewModel::selectContacts,
+            onToggleGroup = viewModel::toggleGroup,
+            onContinueContacts = viewModel::continueContactSelection,
+            onContinueGroups = viewModel::continueGroupSelection,
+            onDestinationModeChange = viewModel::updateContactDestinationMode,
+            onDestinationListChange = viewModel::selectContactDestinationList,
+            onListNameChange = viewModel::updateContactListName,
+            onSkipDuplicatesChange = viewModel::updateSkipDuplicatePhones,
+            onSave = viewModel::saveContactImport,
+        )
+    }
 }
 
 @Composable
@@ -174,6 +250,11 @@ private fun ImportPanel(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            Text(
+                text = "CSV 파일",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
             OutlinedButton(
                 onClick = onChooseFile,
                 enabled = !uiState.isImporting,
@@ -303,3 +384,8 @@ private fun formatDate(epochMillis: Long): String = DATE_FORMATTER.format(
 )
 
 private val DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm")
+
+private enum class ContactPermissionRequest {
+    CONTACTS,
+    GROUPS,
+}

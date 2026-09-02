@@ -6,6 +6,7 @@ import com.lucid47.soheeyagaja.data.CustomerEntity
 import com.lucid47.soheeyagaja.data.CustomerListEntity
 import com.lucid47.soheeyagaja.domain.importing.CustomerCsvBatchReader
 import com.lucid47.soheeyagaja.domain.importing.ImportProgress
+import com.lucid47.soheeyagaja.domain.importing.ImportedCustomer
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -34,6 +35,7 @@ class CustomerImportRepository(private val database: AppDatabase) {
                 name = listName.trim(),
                 sourceName = sourceName,
                 createdAtEpochMillis = createdAt,
+                updatedAtEpochMillis = createdAt,
             ),
         )
 
@@ -72,6 +74,85 @@ class CustomerImportRepository(private val database: AppDatabase) {
 
         require(lastProgress.acceptedRows > 0) { "추가할 수 있는 고객 데이터가 없습니다." }
         ImportResult(listId, lastProgress)
+    }
+
+    suspend fun importContacts(
+        contacts: List<ContactImportRecord>,
+        destination: ContactImportDestination,
+        skipDuplicatePhones: Boolean,
+    ): ContactImportResult = database.withTransaction {
+        require(contacts.isNotEmpty()) { "선택한 연락처가 없습니다." }
+        val now = System.currentTimeMillis()
+        val listId = when (destination) {
+            is ContactImportDestination.NewList -> {
+                val name = destination.name.trim()
+                require(name.isNotEmpty()) { "고객리스트 이름을 입력해주세요." }
+                database.customerListDao().insert(
+                    CustomerListEntity(
+                        name = name,
+                        sourceName = "contacts",
+                        createdAtEpochMillis = now,
+                        updatedAtEpochMillis = now,
+                    ),
+                )
+            }
+
+            is ContactImportDestination.ExistingList -> {
+                require(database.customerListDao().exists(destination.listId)) {
+                    "추가할 고객리스트를 찾지 못했습니다."
+                }
+                destination.listId
+            }
+        }
+
+        val existingPhones = if (skipDuplicatePhones) {
+            database.customerDao().allNormalizedPhones().toMutableSet()
+        } else {
+            mutableSetOf()
+        }
+        val uniqueContacts = contacts.distinctBy(ContactImportRecord::contactIdentifier)
+        var skipped = contacts.size - uniqueContacts.size
+        var added = 0
+
+        uniqueContacts.chunked(CustomerCsvBatchReader.DEFAULT_BATCH_SIZE).forEachIndexed { batchIndex, batch ->
+            val entities = batch.mapIndexedNotNull { rowIndex, contact ->
+                val normalizedPhone = ImportedCustomer.normalizePhone(contact.phoneNumber)
+                if (skipDuplicatePhones && normalizedPhone.isNotEmpty() && !existingPhones.add(normalizedPhone)) {
+                    skipped += 1
+                    null
+                } else {
+                    val resolvedName = contact.name.trim().ifEmpty { "이름 없음" }
+                    val duplicateKey = if (skipDuplicatePhones && normalizedPhone.isNotEmpty()) {
+                        "phone:$normalizedPhone"
+                    } else {
+                        "contact:${contact.contactIdentifier}"
+                    }
+                    CustomerEntity(
+                        listId = listId,
+                        sourceRow = (
+                            batchIndex * CustomerCsvBatchReader.DEFAULT_BATCH_SIZE + rowIndex + 1
+                        ).toLong(),
+                        name = resolvedName,
+                        phone = contact.phoneNumber.trim(),
+                        normalizedPhone = normalizedPhone,
+                        address = contact.address.trim(),
+                        ownedAddress = "",
+                        parcelAddress = "",
+                        notes = contact.notes.trim(),
+                        contactIdentifier = contact.contactIdentifier,
+                        contactRegisteredName = contact.name.trim().ifEmpty { null },
+                        duplicateKey = duplicateKey,
+                        createdAtEpochMillis = now,
+                    )
+                }
+            }
+            val inserted = database.customerDao().insert(entities).count { it != -1L }
+            added += inserted
+            skipped += entities.size - inserted
+        }
+
+        database.customerListDao().touch(listId, now)
+        ContactImportResult(listId = listId, addedCount = added, skippedCount = skipped)
     }
 
     private fun InputStream.bufferedForDetection(): BufferedInputStream =

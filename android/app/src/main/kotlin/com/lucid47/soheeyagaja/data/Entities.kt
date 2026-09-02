@@ -11,6 +11,7 @@ data class CustomerListEntity(
     val name: String,
     val sourceName: String,
     val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long = createdAtEpochMillis,
 )
 
 @Entity(
@@ -40,6 +41,8 @@ data class CustomerEntity(
     val ownedAddress: String,
     val parcelAddress: String,
     val notes: String,
+    val contactIdentifier: String? = null,
+    val contactRegisteredName: String? = null,
     val duplicateKey: String,
     val createdAtEpochMillis: Long,
 )
@@ -49,5 +52,6 @@ data class CustomerListSummary(
     val name: String,
     val sourceName: String,
     val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
     val customerCount: Long,
 )

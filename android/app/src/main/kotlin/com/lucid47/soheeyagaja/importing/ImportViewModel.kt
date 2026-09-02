@@ -5,6 +5,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.lucid47.soheeyagaja.contacts.AndroidContactService
+import com.lucid47.soheeyagaja.contacts.DeviceContactGroup
 import com.lucid47.soheeyagaja.data.AppDatabase
 import com.lucid47.soheeyagaja.domain.importing.ImportProgress
 import kotlinx.coroutines.Dispatchers
@@ -26,10 +28,41 @@ data class ImportUiState(
     val errorMessage: String? = null,
 )
 
+enum class ContactImportStep {
+    CLOSED,
+    CONTACTS,
+    GROUPS,
+    DESTINATION,
+}
+
+enum class ContactDestinationMode {
+    EXISTING_LIST,
+    NEW_LIST,
+}
+
+data class ContactImportUiState(
+    val step: ContactImportStep = ContactImportStep.CLOSED,
+    val isLoading: Boolean = false,
+    val contacts: List<ContactImportRecord> = emptyList(),
+    val groups: List<DeviceContactGroup> = emptyList(),
+    val selectedContactIds: Set<String> = emptySet(),
+    val selectedGroupIds: Set<Long> = emptySet(),
+    val searchQuery: String = "",
+    val destinationMode: ContactDestinationMode = ContactDestinationMode.NEW_LIST,
+    val selectedListId: Long? = null,
+    val newListName: String = "연락처 가져오기",
+    val skipDuplicatePhones: Boolean = true,
+    val statusMessage: String? = null,
+    val errorMessage: String? = null,
+)
+
 class ImportViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = CustomerImportRepository(AppDatabase.get(application))
+    private val contactService = AndroidContactService(application)
     private val _uiState = MutableStateFlow(ImportUiState())
     val uiState = _uiState.asStateFlow()
+    private val _contactUiState = MutableStateFlow(ContactImportUiState())
+    val contactUiState = _contactUiState.asStateFlow()
 
     val customerLists = repository.observeCustomerLists().stateIn(
         scope = viewModelScope,
@@ -108,6 +141,216 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    fun openContactSelection() {
+        loadContactData(ContactImportStep.CONTACTS) { contactService.allContacts() }
+    }
+
+    fun openGroupSelection() {
+        _contactUiState.update {
+            it.copy(
+                step = ContactImportStep.GROUPS,
+                isLoading = true,
+                groups = emptyList(),
+                selectedGroupIds = emptySet(),
+                searchQuery = "",
+                statusMessage = null,
+                errorMessage = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { contactService.groups() }
+                .onSuccess { groups ->
+                    _contactUiState.update {
+                        it.copy(
+                            isLoading = false,
+                            groups = groups,
+                            errorMessage = if (groups.isEmpty()) "연락처 그룹이 없습니다." else null,
+                        )
+                    }
+                }
+                .onFailure(::showContactError)
+        }
+    }
+
+    fun contactPermissionDenied() {
+        _contactUiState.update {
+            it.copy(
+                step = ContactImportStep.CLOSED,
+                isLoading = false,
+                errorMessage = "연락처 접근 권한이 필요합니다. 설정에서 연락처 권한을 허용해주세요.",
+            )
+        }
+    }
+
+    fun closeContactImport() {
+        _contactUiState.update {
+            ContactImportUiState(
+                statusMessage = it.statusMessage,
+                errorMessage = it.errorMessage,
+            )
+        }
+    }
+
+    fun updateContactSearch(value: String) {
+        _contactUiState.update { it.copy(searchQuery = value) }
+    }
+
+    fun toggleContact(contactId: String) {
+        _contactUiState.update { state ->
+            state.copy(selectedContactIds = state.selectedContactIds.toggle(contactId))
+        }
+    }
+
+    fun selectContacts(contactIds: Set<String>) {
+        _contactUiState.update { it.copy(selectedContactIds = contactIds) }
+    }
+
+    fun toggleGroup(groupId: Long) {
+        _contactUiState.update { state ->
+            state.copy(selectedGroupIds = state.selectedGroupIds.toggle(groupId))
+        }
+    }
+
+    fun continueContactSelection() {
+        val state = _contactUiState.value
+        val selected = state.contacts.filter { it.contactIdentifier in state.selectedContactIds }
+        prepareContactDestination(selected, "연락처 가져오기")
+    }
+
+    fun continueGroupSelection() {
+        val state = _contactUiState.value
+        if (state.selectedGroupIds.isEmpty()) return
+        _contactUiState.update { it.copy(isLoading = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching { contactService.contactsInGroups(state.selectedGroupIds) }
+                .onSuccess { contacts ->
+                    val selectedGroups = state.groups.filter { it.id in state.selectedGroupIds }
+                    val defaultName = if (selectedGroups.size == 1) {
+                        selectedGroups.single().name
+                    } else {
+                        "연락처 그룹 ${selectedGroups.size}개"
+                    }
+                    prepareContactDestination(contacts, defaultName)
+                }
+                .onFailure(::showContactError)
+        }
+    }
+
+    fun updateContactDestinationMode(mode: ContactDestinationMode) {
+        _contactUiState.update { it.copy(destinationMode = mode) }
+    }
+
+    fun selectContactDestinationList(listId: Long) {
+        _contactUiState.update { it.copy(selectedListId = listId) }
+    }
+
+    fun updateContactListName(value: String) {
+        _contactUiState.update { it.copy(newListName = value) }
+    }
+
+    fun updateSkipDuplicatePhones(value: Boolean) {
+        _contactUiState.update { it.copy(skipDuplicatePhones = value) }
+    }
+
+    fun saveContactImport() {
+        val state = _contactUiState.value
+        if (state.contacts.isEmpty()) return
+        val destination = when (state.destinationMode) {
+            ContactDestinationMode.EXISTING_LIST -> {
+                val listId = state.selectedListId ?: return
+                ContactImportDestination.ExistingList(listId)
+            }
+            ContactDestinationMode.NEW_LIST -> ContactImportDestination.NewList(state.newListName)
+        }
+
+        _contactUiState.update { it.copy(isLoading = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.importContacts(
+                        contacts = state.contacts,
+                        destination = destination,
+                        skipDuplicatePhones = state.skipDuplicatePhones,
+                    )
+                }
+            }.onSuccess { result ->
+                val duplicateText = if (result.skippedCount > 0) {
+                    " 중복 ${result.skippedCount}명은 건너뛰었습니다."
+                } else {
+                    ""
+                }
+                _contactUiState.value = ContactImportUiState(
+                    statusMessage = "${result.addedCount}명의 연락처를 가져왔습니다.$duplicateText",
+                )
+            }.onFailure(::showContactError)
+        }
+    }
+
+    private fun loadContactData(
+        step: ContactImportStep,
+        loader: suspend () -> List<ContactImportRecord>,
+    ) {
+        _contactUiState.update {
+            it.copy(
+                step = step,
+                isLoading = true,
+                contacts = emptyList(),
+                selectedContactIds = emptySet(),
+                searchQuery = "",
+                statusMessage = null,
+                errorMessage = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { loader() }
+                .onSuccess { contacts ->
+                    _contactUiState.update {
+                        it.copy(
+                            isLoading = false,
+                            contacts = contacts,
+                            errorMessage = if (contacts.isEmpty()) "가져올 연락처가 없습니다." else null,
+                        )
+                    }
+                }
+                .onFailure(::showContactError)
+        }
+    }
+
+    private fun prepareContactDestination(contacts: List<ContactImportRecord>, defaultName: String) {
+        if (contacts.isEmpty()) {
+            _contactUiState.update { it.copy(isLoading = false, errorMessage = "연락처를 선택해주세요.") }
+            return
+        }
+        val lists = customerLists.value
+        _contactUiState.update {
+            it.copy(
+                step = ContactImportStep.DESTINATION,
+                isLoading = false,
+                contacts = contacts,
+                destinationMode = if (lists.isEmpty()) {
+                    ContactDestinationMode.NEW_LIST
+                } else {
+                    ContactDestinationMode.EXISTING_LIST
+                },
+                selectedListId = lists.firstOrNull()?.id,
+                newListName = defaultName,
+                errorMessage = null,
+            )
+        }
+    }
+
+    private fun showContactError(error: Throwable) {
+        _contactUiState.update {
+            it.copy(
+                isLoading = false,
+                errorMessage = error.message ?: "연락처를 불러오지 못했습니다.",
+            )
+        }
+    }
+
+    private fun <T> Set<T>.toggle(value: T): Set<T> =
+        if (value in this) this - value else this + value
 
     private fun resolveDisplayName(uri: Uri): String {
         val resolver = getApplication<Application>().contentResolver

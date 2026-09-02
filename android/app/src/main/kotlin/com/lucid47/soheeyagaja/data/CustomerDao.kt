@@ -16,6 +16,9 @@ interface CustomerDao {
 
     @Query("SELECT COUNT(*) FROM customers WHERE listId = :listId")
     suspend fun count(listId: Long): Long
+
+    @Query("SELECT normalizedPhone FROM customers WHERE normalizedPhone != ''")
+    suspend fun allNormalizedPhones(): List<String>
 }
 
 @Dao
@@ -26,12 +29,19 @@ interface CustomerListDao {
     @Query(
         """
         SELECT customer_lists.id, customer_lists.name, customer_lists.sourceName,
-               customer_lists.createdAtEpochMillis, COUNT(customers.id) AS customerCount
+               customer_lists.createdAtEpochMillis, customer_lists.updatedAtEpochMillis,
+               COUNT(customers.id) AS customerCount
         FROM customer_lists
         LEFT JOIN customers ON customers.listId = customer_lists.id
         GROUP BY customer_lists.id
-        ORDER BY customer_lists.createdAtEpochMillis DESC
+        ORDER BY customer_lists.updatedAtEpochMillis DESC
         """,
     )
     fun observeSummaries(): Flow<List<CustomerListSummary>>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM customer_lists WHERE id = :listId)")
+    suspend fun exists(listId: Long): Boolean
+
+    @Query("UPDATE customer_lists SET updatedAtEpochMillis = :updatedAt WHERE id = :listId")
+    suspend fun touch(listId: Long, updatedAt: Long)
 }

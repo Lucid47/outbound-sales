@@ -47,4 +47,31 @@ class CustomerImportRepositoryTest {
         assertEquals(10_000, result.progress.acceptedRows)
         assertEquals(10_000, database.customerDao().count(result.listId))
     }
+
+    @Test
+    fun contactsAreImportedAndDuplicatePhonesAreSkippedAcrossLists() = runBlocking {
+        val repository = CustomerImportRepository(database)
+        val contacts = listOf(
+            ContactImportRecord("1", "김소희", "010-1234-5678", "서울", "회사 A"),
+            ContactImportRecord("2", "김가자", "01012345678", "부산", "회사 B"),
+            ContactImportRecord("3", "번호없음", "", "대전", ""),
+        )
+
+        val first = repository.importContacts(
+            contacts = contacts,
+            destination = ContactImportDestination.NewList("연락처"),
+            skipDuplicatePhones = true,
+        )
+        val second = repository.importContacts(
+            contacts = listOf(ContactImportRecord("4", "다른 이름", "010 1234 5678", "", "")),
+            destination = ContactImportDestination.NewList("추가 연락처"),
+            skipDuplicatePhones = true,
+        )
+
+        assertEquals(2, first.addedCount)
+        assertEquals(1, first.skippedCount)
+        assertEquals(2, database.customerDao().count(first.listId))
+        assertEquals(0, second.addedCount)
+        assertEquals(1, second.skippedCount)
+    }
 }
