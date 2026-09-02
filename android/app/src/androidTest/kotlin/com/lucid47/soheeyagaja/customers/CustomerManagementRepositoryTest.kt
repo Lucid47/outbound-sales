@@ -58,13 +58,12 @@ class CustomerManagementRepositoryTest {
                 name = "김소희 수정",
                 phone = "010-1234-5678",
                 address = "부산",
-                isDone = true,
                 customFields = listOf(CustomFieldDraft("담당", "이대희")),
             ),
         )
         record = repository.observeCustomer(customerId).first()!!
         assertEquals("김소희 수정", record.customer.name)
-        assertEquals(CustomerManagementRepository.STATUS_DONE, record.customer.status)
+        assertEquals(CustomerManagementRepository.STATUS_OPEN, record.customer.status)
         assertEquals("담당", record.customFields.single().label)
 
         repository.deleteCustomer(customerId)

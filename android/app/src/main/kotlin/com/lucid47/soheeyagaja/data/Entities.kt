@@ -2,6 +2,7 @@ package com.lucid47.soheeyagaja.data
 
 import androidx.room.Entity
 import androidx.room.Embedded
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -76,6 +77,132 @@ data class CustomerWithFields(
     @Embedded val customer: CustomerEntity,
     @Relation(parentColumn = "id", entityColumn = "customerId")
     val customFields: List<CustomerCustomFieldEntity>,
+)
+
+@Entity(
+    tableName = "contact_logs",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("customerId"), Index("listId"), Index("createdAtEpochMillis")],
+)
+data class ContactLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val listId: Long,
+    val customerId: Long,
+    val type: String,
+    val result: String,
+    val messageBody: String? = null,
+    val createdAtEpochMillis: Long,
+)
+
+@Entity(
+    tableName = "visit_logs",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("customerId"), Index("listId"), Index("visitedAtEpochMillis")],
+)
+data class VisitLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val listId: Long,
+    val customerId: Long,
+    val visitedAtEpochMillis: Long,
+    val result: String,
+    val memo: String? = null,
+    val kind: String,
+    val locationAddress: String? = null,
+    val createdAtEpochMillis: Long,
+)
+
+@Entity(
+    tableName = "visit_schedules",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerListEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["listId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["listId", "dateKey"], unique = true)],
+)
+data class VisitScheduleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val listId: Long,
+    val dateKey: String,
+    val title: String,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(
+    tableName = "visit_schedule_items",
+    foreignKeys = [
+        ForeignKey(
+            entity = VisitScheduleEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["scheduleId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("scheduleId"),
+        Index("customerId"),
+        Index("listId"),
+        Index(value = ["scheduleId", "customerId"], unique = true),
+    ],
+)
+data class VisitScheduleItemEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val scheduleId: Long,
+    val listId: Long,
+    val customerId: Long,
+    val orderIndex: Int,
+    val status: String,
+    val completedAtEpochMillis: Long? = null,
+)
+
+data class HistoryEntryRecord(
+    val stableId: String,
+    val listId: Long,
+    val customerId: Long,
+    val customerName: String,
+    val category: String,
+    val type: String,
+    val result: String,
+    val detail: String,
+    val occurredAtEpochMillis: Long,
+)
+
+data class ScheduledCustomerRecord(
+    val scheduleItemId: Long,
+    val scheduleId: Long,
+    val listId: Long,
+    val customerId: Long,
+    val customerName: String,
+    val phone: String,
+    val address: String,
+    @ColumnInfo(name = "customerStatus") val customerStatus: String,
+    val orderIndex: Int,
+    @ColumnInfo(name = "scheduleStatus") val scheduleStatus: String,
+    val completedAtEpochMillis: Long?,
 )
 
 data class CustomerListSummary(

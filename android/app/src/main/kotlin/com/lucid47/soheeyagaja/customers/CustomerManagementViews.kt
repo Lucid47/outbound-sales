@@ -28,12 +28,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
@@ -53,7 +57,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -75,6 +78,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
+import com.lucid47.soheeyagaja.data.HistoryEntryRecord
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -89,6 +93,8 @@ fun CustomerManagementScreen(
     val lists by viewModel.customerLists.collectAsStateWithLifecycle()
     val customers by viewModel.customers.collectAsStateWithLifecycle()
     val selectedCustomer by viewModel.selectedCustomer.collectAsStateWithLifecycle()
+    val selectedCustomerHistory by viewModel.selectedCustomerHistory.collectAsStateWithLifecycle()
+    val todaySchedule by viewModel.todaySchedule.collectAsStateWithLifecycle()
     val selectedList = lists.firstOrNull { it.id == uiState.selectedListId }
 
     Scaffold(
@@ -170,9 +176,20 @@ fun CustomerManagementScreen(
     selectedCustomer?.let { record ->
         CustomerDetailDialog(
             record = record,
+            history = selectedCustomerHistory,
+            isScheduledToday = todaySchedule.any { it.customerId == record.customer.id },
             onDismiss = viewModel::closeCustomer,
             onEdit = { viewModel.openEditCustomer(record) },
             onDelete = { viewModel.requestCustomerDelete(record.customer.id) },
+            onRecordCall = { viewModel.recordCallAttempt(record.customer.id) },
+            onRecordSms = { viewModel.recordSmsAttempt(record.customer.id) },
+            onTextMemo = { viewModel.requestTextMemo(record.customer.id) },
+            onVisit = { viewModel.requestVisit(record.customer.id) },
+            onSetCompleted = { completed -> viewModel.setCustomerCompleted(record.customer.id, completed) },
+            onToggleSchedule = { scheduled ->
+                if (scheduled) viewModel.addToTodaySchedule(record.customer.id)
+                else viewModel.removeFromTodaySchedule(record.customer.id)
+            },
         )
     }
 
@@ -228,6 +245,43 @@ fun CustomerManagementScreen(
                 }
             },
             dismissButton = { TextButton(onClick = viewModel::cancelCustomerDelete) { Text("취소") } },
+        )
+    }
+
+
+    uiState.visitPromptCustomerId?.let {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelVisit,
+            title = { Text("상세한 히스토리를 기록하겠습니까?") },
+            text = { Text("빠른 방문은 현재 날짜와 시간만 남깁니다. 상세 기록에서는 텍스트 메모를 함께 저장할 수 있습니다.") },
+            confirmButton = { TextButton(onClick = viewModel::openDetailedVisitMemo) { Text("상세 기록") } },
+            dismissButton = { TextButton(onClick = viewModel::recordQuickVisit) { Text("빠른 방문") } },
+        )
+    }
+
+    uiState.memoEditor?.let { editor ->
+        AlertDialog(
+            onDismissRequest = viewModel::closeMemoEditor,
+            title = { Text(if (editor.mode == MemoMode.VISIT_DETAIL) "상세 방문 메모" else "텍스트 메모") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = editor.text,
+                        onValueChange = viewModel::updateMemoText,
+                        label = { Text("메모 내용") },
+                        minLines = 4,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    editor.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::saveMemo, enabled = !editor.isSaving) {
+                    if (editor.isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Text("저장")
+                }
+            },
+            dismissButton = { TextButton(onClick = viewModel::closeMemoEditor) { Text("취소") } },
         )
     }
 }
@@ -367,9 +421,17 @@ private fun StatusBanner(message: String, isError: Boolean) {
 @Composable
 private fun CustomerDetailDialog(
     record: CustomerWithFields,
+    history: List<HistoryEntryRecord>,
+    isScheduledToday: Boolean,
     onDismiss: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onRecordCall: () -> Unit,
+    onRecordSms: () -> Unit,
+    onTextMemo: () -> Unit,
+    onVisit: () -> Unit,
+    onSetCompleted: (Boolean) -> Unit,
+    onToggleSchedule: (Boolean) -> Unit,
 ) {
     val customer = record.customer
     val context = LocalContext.current
@@ -403,9 +465,11 @@ private fun CustomerDetailDialog(
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ActionButton("전화", Icons.Default.Phone, customer.phone.isNotBlank()) {
+                                onRecordCall()
                                 context.openIntent(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(customer.phone)}")))
                             }
                             ActionButton("문자", Icons.AutoMirrored.Filled.Message, customer.phone.isNotBlank()) {
+                                onRecordSms()
                                 context.openIntent(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${Uri.encode(customer.phone)}")))
                             }
                             ActionButton("길찾기", Icons.Default.Directions, customer.address.isNotBlank()) {
@@ -415,6 +479,34 @@ private fun CustomerDetailDialog(
                                         Uri.parse("geo:0,0?q=${Uri.encode(customer.address)}(${Uri.encode(customer.name)})"),
                                     ),
                                 )
+                            }
+                        }
+                    }
+                    item {
+                        DetailSection("고객 터치") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ActionButton("텍스트 메모", Icons.Default.NoteAdd, true, onTextMemo)
+                                ActionButton("방문", Icons.Default.LocationOn, true, onVisit)
+                            }
+                        }
+                    }
+                    item {
+                        DetailSection("상태와 스케줄") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ActionButton(
+                                    if (customer.status == CustomerManagementRepository.STATUS_DONE) "완료 취소" else "완료 처리",
+                                    Icons.Default.CheckCircle,
+                                    true,
+                                ) {
+                                    onSetCompleted(customer.status != CustomerManagementRepository.STATUS_DONE)
+                                }
+                                ActionButton(
+                                    if (isScheduledToday) "스케줄 해제" else "오늘 스케줄",
+                                    Icons.Default.CalendarMonth,
+                                    true,
+                                ) {
+                                    onToggleSchedule(!isScheduledToday)
+                                }
                             }
                         }
                     }
@@ -444,6 +536,42 @@ private fun CustomerDetailDialog(
                             DetailSection("추가 항목") {
                                 record.customFields.sortedBy { it.sortOrder }.forEach { field ->
                                     DetailValue(field.label, field.value)
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        DetailSection("최근 히스토리") {
+                            if (history.isEmpty()) {
+                                Text("기록이 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                history.take(5).forEachIndexed { index, entry ->
+                                    if (index > 0) HorizontalDivider()
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(20.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(historyTitle(entry), fontWeight = FontWeight.Bold)
+                                            if (entry.detail.isNotBlank()) {
+                                                Text(
+                                                    entry.detail,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            Text(
+                                                HISTORY_DATE_FORMATTER.format(
+                                                    Instant.ofEpochMilli(entry.occurredAtEpochMillis)
+                                                        .atZone(ZoneId.systemDefault()),
+                                                ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -558,24 +686,6 @@ private fun CustomerEditorDialog(
                         )
                     }
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("완료 상태", fontWeight = FontWeight.Bold)
-                                Text(
-                                    if (draft.isDone) "완료" else "미완료",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = draft.isDone,
-                                onCheckedChange = { onDraftChange(draft.copy(isDone = it)) },
-                            )
-                        }
-                    }
-                    item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("추가 항목", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             IconButton(
@@ -664,3 +774,4 @@ private fun Context.openIntent(intent: Intent) {
 }
 
 private val DETAIL_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm")
+private val HISTORY_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm")

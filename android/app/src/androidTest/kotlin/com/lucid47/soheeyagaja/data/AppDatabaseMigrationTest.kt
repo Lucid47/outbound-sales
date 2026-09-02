@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
     @Test
-    fun migrationOneToThreePreservesDataAndAddsCustomerManagementSchema() {
+    fun migrationOneToFourPreservesDataAndAddsActivitySchema() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TEST_DATABASE)
         val legacy = FrameworkSQLiteOpenHelperFactory().create(
@@ -35,7 +35,11 @@ class AppDatabaseMigrationTest {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, TEST_DATABASE)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+            )
             .build()
         migrated.openHelper.writableDatabase
 
@@ -62,6 +66,12 @@ class AppDatabaseMigrationTest {
             "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_custom_fields'",
         )
         customFieldsTable.use { assertTrue(it.moveToFirst()) }
+        listOf("contact_logs", "visit_logs", "visit_schedules", "visit_schedule_items").forEach { table ->
+            val tableCursor = migrated.openHelper.readableDatabase.query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'",
+            )
+            tableCursor.use { assertTrue("$table 테이블이 필요합니다.", it.moveToFirst()) }
+        }
         migrated.close()
         context.deleteDatabase(TEST_DATABASE)
     }

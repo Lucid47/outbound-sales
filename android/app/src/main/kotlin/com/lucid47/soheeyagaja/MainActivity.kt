@@ -49,7 +49,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +64,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.lucid47.soheeyagaja.contacts.ContactImportDialog
 import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
+import com.lucid47.soheeyagaja.activities.HistoryActivityScreen
+import com.lucid47.soheeyagaja.activities.TodayActivityScreen
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.customers.CustomerManagementScreen
 import com.lucid47.soheeyagaja.customers.CustomerManagementViewModel
@@ -74,11 +75,8 @@ import com.lucid47.soheeyagaja.importing.ImportUiState
 import com.lucid47.soheeyagaja.importing.ImportViewModel
 import com.lucid47.soheeyagaja.ui.theme.SoheeyaGajaTheme
 import java.time.Instant
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
-import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val importViewModel: ImportViewModel by viewModels()
@@ -142,7 +140,14 @@ private fun SoheeyaGajaApp(
     ) { rootPadding ->
         val modifier = Modifier.fillMaxSize().padding(rootPadding)
         when (selectedTab) {
-            RootTab.TODAY -> TodaySummaryScreen(managementLists, modifier)
+            RootTab.TODAY -> TodayActivityScreen(
+                viewModel = customerViewModel,
+                modifier = modifier,
+                onOpenCustomer = { customerId ->
+                    customerViewModel.openCustomer(customerId)
+                    selectedTab = RootTab.CUSTOMERS
+                },
+            )
             RootTab.CUSTOMERS -> CustomerManagementScreen(customerViewModel, modifier)
             RootTab.IMPORT -> CustomerImportScreen(
                 viewModel = importViewModel,
@@ -154,86 +159,8 @@ private fun SoheeyaGajaApp(
                 onImport = importViewModel::importSelectedFile,
                 modifier = modifier,
             )
-            RootTab.HISTORY -> EmptyRootScreen("기록", "기록 없음", Icons.Default.History, modifier)
+            RootTab.HISTORY -> HistoryActivityScreen(customerViewModel, modifier)
             RootTab.SETTINGS -> SettingsSummaryScreen(managementLists, modifier)
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TodaySummaryScreen(lists: List<CustomerListSummary>, modifier: Modifier) {
-    var now by remember { mutableStateOf(LocalDateTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = LocalDateTime.now()
-            delay(1_000)
-        }
-    }
-    val customerCount = lists.sumOf(CustomerListSummary::customerCount)
-    Scaffold(
-        modifier = modifier,
-        topBar = { TopAppBar(title = { Text("오늘", fontWeight = FontWeight.Bold) }) },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                top = padding.calculateTopPadding() + 12.dp,
-                end = 16.dp,
-                bottom = padding.calculateBottomPadding() + 24.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            item {
-                Text(
-                    TODAY_DATE_FORMATTER.format(now),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    TODAY_TIME_FORMATTER.format(now),
-                    style = MaterialTheme.typography.displayMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            item {
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(18.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        SummaryMetric("고객리스트", lists.size.toLong())
-                        SummaryMetric("전체 고객", customerCount)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryMetric(label: String, value: Long) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("$value", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun EmptyRootScreen(
-    title: String,
-    message: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    modifier: Modifier,
-) {
-    Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text(title, fontWeight = FontWeight.Bold) }) }) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(48.dp))
-                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
     }
 }
@@ -255,7 +182,7 @@ private fun SettingsSummaryScreen(lists: List<CustomerListSummary>, modifier: Mo
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.2.0")
+                        Text("소희야 가자 Android 0.3.0")
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }
@@ -559,8 +486,6 @@ private fun formatDate(epochMillis: Long): String = DATE_FORMATTER.format(
 )
 
 private val DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm")
-private val TODAY_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy년 M월 d일 EEEE", Locale.KOREAN)
-private val TODAY_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
 
 private enum class ContactPermissionRequest {
     CONTACTS,

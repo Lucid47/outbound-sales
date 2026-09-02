@@ -8,13 +8,22 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CustomerListEntity::class, CustomerEntity::class, CustomerCustomFieldEntity::class],
-    version = 3,
+    entities = [
+        CustomerListEntity::class,
+        CustomerEntity::class,
+        CustomerCustomFieldEntity::class,
+        ContactLogEntity::class,
+        VisitLogEntity::class,
+        VisitScheduleEntity::class,
+        VisitScheduleItemEntity::class,
+    ],
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun customerDao(): CustomerDao
     abstract fun customerListDao(): CustomerListDao
+    abstract fun activityDao(): ActivityDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -24,7 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "soheeya-gaja.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }
@@ -68,6 +77,106 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_customer_custom_fields_customerId " +
                         "ON customer_custom_fields (customerId)",
+                )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS contact_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        listId INTEGER NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        type TEXT NOT NULL,
+                        result TEXT NOT NULL,
+                        messageBody TEXT,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        FOREIGN KEY(customerId) REFERENCES customers(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_contact_logs_customerId ON contact_logs (customerId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_contact_logs_listId ON contact_logs (listId)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_contact_logs_createdAtEpochMillis " +
+                        "ON contact_logs (createdAtEpochMillis)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS visit_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        listId INTEGER NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        visitedAtEpochMillis INTEGER NOT NULL,
+                        result TEXT NOT NULL,
+                        memo TEXT,
+                        kind TEXT NOT NULL,
+                        locationAddress TEXT,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        FOREIGN KEY(customerId) REFERENCES customers(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_visit_logs_customerId ON visit_logs (customerId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_visit_logs_listId ON visit_logs (listId)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_visit_logs_visitedAtEpochMillis " +
+                        "ON visit_logs (visitedAtEpochMillis)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS visit_schedules (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        listId INTEGER NOT NULL,
+                        dateKey TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL,
+                        FOREIGN KEY(listId) REFERENCES customer_lists(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_visit_schedules_listId_dateKey " +
+                        "ON visit_schedules (listId, dateKey)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS visit_schedule_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        scheduleId INTEGER NOT NULL,
+                        listId INTEGER NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        orderIndex INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        completedAtEpochMillis INTEGER,
+                        FOREIGN KEY(scheduleId) REFERENCES visit_schedules(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(customerId) REFERENCES customers(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_visit_schedule_items_scheduleId " +
+                        "ON visit_schedule_items (scheduleId)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_visit_schedule_items_customerId " +
+                        "ON visit_schedule_items (customerId)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_visit_schedule_items_listId " +
+                        "ON visit_schedule_items (listId)",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_visit_schedule_items_scheduleId_customerId " +
+                        "ON visit_schedule_items (scheduleId, customerId)",
                 )
             }
         }

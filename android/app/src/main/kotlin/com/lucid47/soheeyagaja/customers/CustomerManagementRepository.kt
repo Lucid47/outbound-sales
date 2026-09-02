@@ -20,7 +20,6 @@ data class CustomerDraft(
     val parcelAddress: String = "",
     val birthDate: String = "",
     val notes: String = "",
-    val isDone: Boolean = false,
     val customFields: List<CustomFieldDraft> = emptyList(),
 )
 
@@ -53,7 +52,7 @@ class CustomerManagementRepository(private val database: AppDatabase) {
                 parcelAddress = draft.parcelAddress.trim(),
                 birthDate = draft.birthDate.trim(),
                 notes = draft.notes.trim(),
-                status = if (draft.isDone) STATUS_DONE else STATUS_OPEN,
+                status = STATUS_OPEN,
                 duplicateKey = if (normalizedPhone.isNotEmpty()) {
                     "phone:$normalizedPhone"
                 } else {
@@ -90,7 +89,6 @@ class CustomerManagementRepository(private val database: AppDatabase) {
                 parcelAddress = draft.parcelAddress.trim(),
                 birthDate = draft.birthDate.trim(),
                 notes = draft.notes.trim(),
-                status = if (draft.isDone) STATUS_DONE else STATUS_OPEN,
                 duplicateKey = if (normalizedPhone.isNotEmpty()) {
                     "phone:$normalizedPhone"
                 } else if (existing.duplicateKey.startsWith("phone:")) {

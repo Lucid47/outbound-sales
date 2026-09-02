@@ -3,9 +3,13 @@ package com.lucid47.soheeyagaja.customers
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.lucid47.soheeyagaja.activities.ActivityRepository
 import com.lucid47.soheeyagaja.data.AppDatabase
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
+import com.lucid47.soheeyagaja.data.HistoryEntryRecord
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -26,6 +30,37 @@ data class CustomerEditorState(
     val errorMessage: String? = null,
 )
 
+enum class HistoryKindFilter {
+    ALL,
+    TOUCH,
+    VISIT,
+    DONE,
+}
+
+enum class MemoMode {
+    TEXT_MEMO,
+    VISIT_DETAIL,
+}
+
+data class MemoEditorState(
+    val customerId: Long,
+    val mode: MemoMode,
+    val text: String = "",
+    val isSaving: Boolean = false,
+    val errorMessage: String? = null,
+)
+
+fun historyTitle(entry: HistoryEntryRecord): String = when (entry.type) {
+    ActivityRepository.TYPE_CALL -> "전화 시도"
+    ActivityRepository.TYPE_MANUAL_SMS -> "문자 시도"
+    ActivityRepository.TYPE_NOTE -> "텍스트 메모"
+    ActivityRepository.TYPE_STATUS_COMPLETE -> "완료 처리"
+    ActivityRepository.TYPE_STATUS_REOPEN -> "완료 취소"
+    ActivityRepository.VISIT_QUICK -> "방문"
+    ActivityRepository.VISIT_TEXT_MEMO -> "텍스트 메모"
+    else -> "고객 터치"
+}
+
 data class CustomerManagementUiState(
     val selectedListId: Long? = null,
     val searchQuery: String = "",
@@ -35,13 +70,23 @@ data class CustomerManagementUiState(
     val renameValue: String = "",
     val deleteListId: Long? = null,
     val deleteCustomerId: Long? = null,
+    val visitPromptCustomerId: Long? = null,
+    val memoEditor: MemoEditorState? = null,
+    val historyCustomerId: Long? = null,
+    val historySearchQuery: String = "",
+    val historyKindFilter: HistoryKindFilter = HistoryKindFilter.ALL,
+    val historyDateFilterEnabled: Boolean = false,
+    val historyStartEpochDay: Long = LocalDate.now().minusDays(30).toEpochDay(),
+    val historyEndEpochDay: Long = LocalDate.now().toEpochDay(),
     val statusMessage: String? = null,
     val errorMessage: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CustomerManagementViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = CustomerManagementRepository(AppDatabase.get(application))
+    private val database = AppDatabase.get(application)
+    private val repository = CustomerManagementRepository(database)
+    private val activityRepository = ActivityRepository(database)
     private val _uiState = MutableStateFlow(CustomerManagementUiState())
     val uiState = _uiState
 
@@ -57,6 +102,12 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         .flatMapLatest { state ->
             state?.let(repository::observeCustomers) ?: flowOf(emptyList())
         }
+
+    val allCustomers = selectedListCustomers.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        emptyList(),
+    )
 
     val customers = combine(selectedListCustomers, _uiState) { customers, state ->
         val query = state.searchQuery.trim()
@@ -87,6 +138,68 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         .flatMapLatest { customerId ->
             customerId?.let(repository::observeCustomer) ?: flowOf(null)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val rawHistory = _uiState
+        .map { state -> state.selectedListId }
+        .distinctUntilChanged()
+        .flatMapLatest { listId ->
+            listId?.let(activityRepository::observeHistoryForList) ?: flowOf(emptyList())
+        }
+
+    val allHistoryEntries = rawHistory.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        emptyList(),
+    )
+
+    val historyEntries = combine(rawHistory, allCustomers, _uiState) { entries, customers, state ->
+        val query = state.historySearchQuery.trim()
+        val zone = ZoneId.systemDefault()
+        val completedCustomerIds = customers
+            .filter { it.customer.status == CustomerManagementRepository.STATUS_DONE }
+            .mapTo(mutableSetOf()) { it.customer.id }
+        entries.filter { entry ->
+            val matchesType = when (state.historyKindFilter) {
+                HistoryKindFilter.ALL -> true
+                HistoryKindFilter.TOUCH -> entry.category == CATEGORY_CONTACT
+                HistoryKindFilter.VISIT -> entry.category == CATEGORY_VISIT
+                HistoryKindFilter.DONE -> entry.customerId in completedCustomerIds
+            }
+            val matchesQuery = query.isEmpty() || listOf(
+                entry.customerName,
+                historyTitle(entry),
+                entry.detail,
+            ).any { it.contains(query, ignoreCase = true) }
+            val epochDay = java.time.Instant.ofEpochMilli(entry.occurredAtEpochMillis)
+                .atZone(zone)
+                .toLocalDate()
+                .toEpochDay()
+            val matchesDate = !state.historyDateFilterEnabled ||
+                epochDay in state.historyStartEpochDay..state.historyEndEpochDay
+            matchesType && matchesQuery && matchesDate
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val selectedCustomerHistory = _uiState
+        .map { state -> state.selectedCustomerId }
+        .distinctUntilChanged()
+        .flatMapLatest { customerId ->
+            customerId?.let(activityRepository::observeHistoryForCustomer) ?: flowOf(emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val historyDialogEntries = _uiState
+        .map { state -> state.historyCustomerId }
+        .distinctUntilChanged()
+        .flatMapLatest { customerId ->
+            customerId?.let(activityRepository::observeHistoryForCustomer) ?: flowOf(emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val todaySchedule = _uiState
+        .map { state -> state.selectedListId }
+        .distinctUntilChanged()
+        .flatMapLatest { listId ->
+            listId?.let { activityRepository.observeTodaySchedule(it) } ?: flowOf(emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -138,7 +251,6 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
                         parcelAddress = customer.parcelAddress,
                         birthDate = customer.birthDate,
                         notes = customer.notes,
-                        isDone = customer.status == CustomerManagementRepository.STATUS_DONE,
                         customFields = record.customFields.sortedBy { field -> field.sortOrder }.map { field ->
                             CustomFieldDraft(field.label, field.value)
                         },
@@ -263,6 +375,145 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         }
     }
 
+    fun recordCallAttempt(customerId: Long) {
+        launchActivityAction("전화 시도를 기록했습니다.") {
+            activityRepository.recordCallAttempt(customerId)
+        }
+    }
+
+    fun recordSmsAttempt(customerId: Long) {
+        launchActivityAction("문자 시도를 기록했습니다.") {
+            activityRepository.recordSmsAttempt(customerId)
+        }
+    }
+
+    fun requestTextMemo(customerId: Long) {
+        _uiState.update {
+            it.copy(memoEditor = MemoEditorState(customerId, MemoMode.TEXT_MEMO))
+        }
+    }
+
+    fun requestVisit(customerId: Long) {
+        _uiState.update { it.copy(visitPromptCustomerId = customerId) }
+    }
+
+    fun cancelVisit() {
+        _uiState.update { it.copy(visitPromptCustomerId = null) }
+    }
+
+    fun recordQuickVisit() {
+        val customerId = _uiState.value.visitPromptCustomerId ?: return
+        _uiState.update { it.copy(visitPromptCustomerId = null) }
+        launchActivityAction("방문 히스토리를 기록했습니다.") {
+            activityRepository.recordQuickVisit(customerId)
+        }
+    }
+
+    fun openDetailedVisitMemo() {
+        val customerId = _uiState.value.visitPromptCustomerId ?: return
+        _uiState.update {
+            it.copy(
+                visitPromptCustomerId = null,
+                memoEditor = MemoEditorState(customerId, MemoMode.VISIT_DETAIL),
+            )
+        }
+    }
+
+    fun updateMemoText(text: String) {
+        _uiState.update { state ->
+            state.copy(memoEditor = state.memoEditor?.copy(text = text, errorMessage = null))
+        }
+    }
+
+    fun closeMemoEditor() {
+        _uiState.update { it.copy(memoEditor = null) }
+    }
+
+    fun saveMemo() {
+        val editor = _uiState.value.memoEditor ?: return
+        if (editor.text.isBlank()) {
+            _uiState.update {
+                it.copy(memoEditor = editor.copy(errorMessage = "메모 내용을 입력해주세요."))
+            }
+            return
+        }
+        _uiState.update { it.copy(memoEditor = editor.copy(isSaving = true, errorMessage = null)) }
+        viewModelScope.launch {
+            runCatching { activityRepository.recordTextMemo(editor.customerId, editor.text) }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            memoEditor = null,
+                            statusMessage = if (editor.mode == MemoMode.VISIT_DETAIL) {
+                                "상세 방문 메모를 기록했습니다."
+                            } else {
+                                "텍스트 메모를 기록했습니다."
+                            },
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(memoEditor = editor.copy(isSaving = false, errorMessage = error.message))
+                    }
+                }
+        }
+    }
+
+    fun setCustomerCompleted(customerId: Long, completed: Boolean) {
+        launchActivityAction(if (completed) "완료 처리했습니다." else "완료를 취소했습니다.") {
+            activityRepository.setCustomerCompleted(customerId, completed)
+        }
+    }
+
+    fun addToTodaySchedule(customerId: Long) {
+        launchActivityAction("오늘 스케줄에 추가했습니다.") {
+            activityRepository.addToTodaySchedule(customerId)
+        }
+    }
+
+    fun removeFromTodaySchedule(customerId: Long) {
+        launchActivityAction("오늘 스케줄에서 제외했습니다.") {
+            activityRepository.removeFromTodaySchedule(customerId)
+        }
+    }
+
+    fun updateHistorySearch(query: String) {
+        _uiState.update { it.copy(historySearchQuery = query) }
+    }
+
+    fun setHistoryKindFilter(filter: HistoryKindFilter) {
+        _uiState.update { it.copy(historyKindFilter = filter) }
+    }
+
+    fun setHistoryDateFilterEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(historyDateFilterEnabled = enabled) }
+    }
+
+    fun setHistoryStartEpochDay(epochDay: Long) {
+        _uiState.update { state ->
+            state.copy(
+                historyStartEpochDay = epochDay.coerceAtMost(state.historyEndEpochDay),
+            )
+        }
+    }
+
+    fun setHistoryEndEpochDay(epochDay: Long) {
+        _uiState.update { state ->
+            state.copy(
+                historyEndEpochDay = epochDay.coerceAtLeast(state.historyStartEpochDay),
+            )
+        }
+    }
+
+    fun openHistoryCustomer(customerId: Long) {
+        _uiState.update { it.copy(historyCustomerId = customerId) }
+    }
+
+    fun closeHistoryCustomer() {
+        _uiState.update { it.copy(historyCustomerId = null) }
+    }
+
     fun clearMessage() {
         _uiState.update { it.copy(statusMessage = null, errorMessage = null) }
     }
@@ -271,5 +522,18 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         _uiState.update {
             it.copy(errorMessage = error.message ?: "작업을 완료하지 못했습니다.")
         }
+    }
+
+    private fun launchActivityAction(successMessage: String, action: suspend () -> Unit) {
+        viewModelScope.launch {
+            runCatching { action() }
+                .onSuccess { _uiState.update { it.copy(statusMessage = successMessage, errorMessage = null) } }
+                .onFailure(::showError)
+        }
+    }
+
+    private companion object {
+        const val CATEGORY_CONTACT = "CONTACT"
+        const val CATEGORY_VISIT = "VISIT"
     }
 }

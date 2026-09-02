@@ -48,6 +48,9 @@ interface CustomerDao {
     @Query("DELETE FROM customers WHERE id = :customerId")
     suspend fun deleteById(customerId: Long)
 
+    @Query("UPDATE customers SET status = :status, updatedAtEpochMillis = :updatedAt WHERE id = :customerId")
+    suspend fun updateStatus(customerId: Long, status: String, updatedAt: Long)
+
     @Query("SELECT duplicateKey FROM customers WHERE listId = :listId")
     suspend fun duplicateKeys(listId: Long): List<String>
 
