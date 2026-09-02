@@ -19,8 +19,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DashboardStatusEntity::class,
         DashboardSettingsEntity::class,
         ProcessStatusLogEntity::class,
+        PhotoMemoEntity::class,
+        AudioMemoEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun customerListDao(): CustomerListDao
     abstract fun activityDao(): ActivityDao
     abstract fun dashboardDao(): DashboardDao
+    abstract fun attachmentDao(): AttachmentDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -37,7 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "soheeya-gaja.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 .also { instance = it }
         }
@@ -259,6 +262,55 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_process_status_logs_createdAtEpochMillis " +
                         "ON process_status_logs (createdAtEpochMillis)",
+                )
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE customers ADD COLUMN latitude REAL")
+                db.execSQL("ALTER TABLE customers ADD COLUMN longitude REAL")
+                db.execSQL("ALTER TABLE customers ADD COLUMN geocodedAtEpochMillis INTEGER")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS photo_memos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        listId INTEGER NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        filePath TEXT NOT NULL,
+                        originalName TEXT NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        FOREIGN KEY(customerId) REFERENCES customers(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_photo_memos_customerId ON photo_memos (customerId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_photo_memos_listId ON photo_memos (listId)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_photo_memos_createdAtEpochMillis " +
+                        "ON photo_memos (createdAtEpochMillis)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS audio_memos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        listId INTEGER NOT NULL,
+                        customerId INTEGER NOT NULL,
+                        filePath TEXT NOT NULL,
+                        durationMillis INTEGER NOT NULL,
+                        transcript TEXT NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        FOREIGN KEY(customerId) REFERENCES customers(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_audio_memos_customerId ON audio_memos (customerId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_audio_memos_listId ON audio_memos (listId)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_audio_memos_createdAtEpochMillis " +
+                        "ON audio_memos (createdAtEpochMillis)",
                 )
             }
         }

@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
     @Test
-    fun migrationOneToFivePreservesDataAndAddsDashboardSchema() {
+    fun migrationOneToSixPreservesDataAndAddsMapAndMediaSchema() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TEST_DATABASE)
         val legacy = FrameworkSQLiteOpenHelperFactory().create(
@@ -40,6 +40,7 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
             )
             .build()
         migrated.openHelper.writableDatabase
@@ -64,6 +65,9 @@ class AppDatabaseMigrationTest {
         assertTrue("status" in columnNames)
         assertTrue("updatedAtEpochMillis" in columnNames)
         assertTrue("dashboardStatusId" in columnNames)
+        assertTrue("latitude" in columnNames)
+        assertTrue("longitude" in columnNames)
+        assertTrue("geocodedAtEpochMillis" in columnNames)
         val customFieldsTable = migrated.openHelper.readableDatabase.query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_custom_fields'",
         )
@@ -75,6 +79,12 @@ class AppDatabaseMigrationTest {
             tableCursor.use { assertTrue("$table 테이블이 필요합니다.", it.moveToFirst()) }
         }
         listOf("dashboard_statuses", "dashboard_settings", "process_status_logs").forEach { table ->
+            val tableCursor = migrated.openHelper.readableDatabase.query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'",
+            )
+            tableCursor.use { assertTrue("$table 테이블이 필요합니다.", it.moveToFirst()) }
+        }
+        listOf("photo_memos", "audio_memos").forEach { table ->
             val tableCursor = migrated.openHelper.readableDatabase.query(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'",
             )

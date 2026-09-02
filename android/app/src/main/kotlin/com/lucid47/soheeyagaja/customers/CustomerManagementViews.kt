@@ -1,8 +1,12 @@
 package com.lucid47.soheeyagaja.customers
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,7 +42,10 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
@@ -77,10 +84,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.ContextCompat
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
 import com.lucid47.soheeyagaja.data.HistoryEntryRecord
 import com.lucid47.soheeyagaja.dashboard.ProcessDashboardDialog
+import com.lucid47.soheeyagaja.location.CustomerMapDialog
+import com.lucid47.soheeyagaja.media.AudioMemoDialog
+import com.lucid47.soheeyagaja.media.HistoryMediaPreview
+import com.lucid47.soheeyagaja.media.PhotoMemoDialog
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -98,6 +110,25 @@ fun CustomerManagementScreen(
     val selectedCustomerHistory by viewModel.selectedCustomerHistory.collectAsStateWithLifecycle()
     val todaySchedule by viewModel.todaySchedule.collectAsStateWithLifecycle()
     val selectedList = lists.firstOrNull { it.id == uiState.selectedListId }
+    val context = LocalContext.current
+    val locationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        if (grants.values.any { it }) viewModel.recordQuickVisitWithLocation() else viewModel.recordQuickVisit()
+    }
+
+    fun recordQuickVisit() {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        ) {
+            viewModel.recordQuickVisitWithLocation()
+        } else {
+            locationPermission.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+            )
+        }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -105,6 +136,12 @@ fun CustomerManagementScreen(
             TopAppBar(
                 title = { Text("고객", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(
+                        onClick = viewModel::openCustomerMap,
+                        enabled = selectedList != null,
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = "고객 지도")
+                    }
                     IconButton(
                         onClick = viewModel::openDashboard,
                         enabled = selectedList != null,
@@ -192,6 +229,8 @@ fun CustomerManagementScreen(
             onRecordCall = { viewModel.recordCallAttempt(record.customer.id) },
             onRecordSms = { viewModel.recordSmsAttempt(record.customer.id) },
             onTextMemo = { viewModel.requestTextMemo(record.customer.id) },
+            onPhotoMemo = { viewModel.openPhotoMemo(record.customer.id) },
+            onAudioMemo = { viewModel.openAudioMemo(record.customer.id) },
             onVisit = { viewModel.requestVisit(record.customer.id) },
             onSetCompleted = { completed -> viewModel.setCustomerCompleted(record.customer.id, completed) },
             onToggleSchedule = { scheduled ->
@@ -212,6 +251,18 @@ fun CustomerManagementScreen(
 
     if (uiState.dashboardVisible) {
         ProcessDashboardDialog(viewModel = viewModel, onDismiss = viewModel::closeDashboard)
+    }
+
+    if (uiState.mapVisible) {
+        CustomerMapDialog(viewModel = viewModel, onDismiss = viewModel::closeCustomerMap)
+    }
+
+    uiState.photoMemoCustomerId?.let { customerId ->
+        PhotoMemoDialog(customerId, viewModel, viewModel::closePhotoMemo)
+    }
+
+    uiState.audioMemoCustomerId?.let { customerId ->
+        AudioMemoDialog(customerId, viewModel, viewModel::closeAudioMemo)
     }
 
     uiState.renameListId?.let {
@@ -265,9 +316,9 @@ fun CustomerManagementScreen(
         AlertDialog(
             onDismissRequest = viewModel::cancelVisit,
             title = { Text("상세한 히스토리를 기록하겠습니까?") },
-            text = { Text("빠른 방문은 현재 날짜와 시간만 남깁니다. 상세 기록에서는 텍스트 메모를 함께 저장할 수 있습니다.") },
+            text = { Text("빠른 방문은 현재 날짜·시간과 위치를 주소로 남깁니다. 상세 기록에서는 텍스트 메모를 함께 저장할 수 있습니다.") },
             confirmButton = { TextButton(onClick = viewModel::openDetailedVisitMemo) { Text("상세 기록") } },
-            dismissButton = { TextButton(onClick = viewModel::recordQuickVisit) { Text("빠른 방문") } },
+            dismissButton = { TextButton(onClick = ::recordQuickVisit) { Text("빠른 방문") } },
         )
     }
 
@@ -441,6 +492,8 @@ private fun CustomerDetailDialog(
     onRecordCall: () -> Unit,
     onRecordSms: () -> Unit,
     onTextMemo: () -> Unit,
+    onPhotoMemo: () -> Unit,
+    onAudioMemo: () -> Unit,
     onVisit: () -> Unit,
     onSetCompleted: (Boolean) -> Unit,
     onToggleSchedule: (Boolean) -> Unit,
@@ -498,6 +551,10 @@ private fun CustomerDetailDialog(
                         DetailSection("고객 터치") {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ActionButton("텍스트 메모", Icons.Default.NoteAdd, true, onTextMemo)
+                                ActionButton("사진 메모", Icons.Default.PhotoCamera, true, onPhotoMemo)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ActionButton("음성 메모", Icons.Default.Mic, true, onAudioMemo)
                                 ActionButton("방문", Icons.Default.LocationOn, true, onVisit)
                             }
                         }
@@ -582,6 +639,7 @@ private fun CustomerDetailDialog(
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
+                                            HistoryMediaPreview(entry, Modifier.fillMaxWidth().height(96.dp))
                                         }
                                     }
                                 }

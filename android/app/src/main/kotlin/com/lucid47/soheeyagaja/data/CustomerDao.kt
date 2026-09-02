@@ -51,6 +51,17 @@ interface CustomerDao {
     @Query("UPDATE customers SET status = :status, updatedAtEpochMillis = :updatedAt WHERE id = :customerId")
     suspend fun updateStatus(customerId: Long, status: String, updatedAt: Long)
 
+    @Query(
+        "UPDATE customers SET latitude = :latitude, longitude = :longitude, " +
+            "geocodedAtEpochMillis = :geocodedAt WHERE id = :customerId",
+    )
+    suspend fun updateCoordinates(
+        customerId: Long,
+        latitude: Double?,
+        longitude: Double?,
+        geocodedAt: Long,
+    )
+
     @Query("SELECT duplicateKey FROM customers WHERE listId = :listId")
     suspend fun duplicateKeys(listId: Long): List<String>
 

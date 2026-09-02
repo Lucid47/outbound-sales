@@ -8,10 +8,16 @@ import com.lucid47.soheeyagaja.dashboard.DashboardPaletteFamily
 import com.lucid47.soheeyagaja.dashboard.DashboardRepository
 import com.lucid47.soheeyagaja.contacts.AndroidContactService
 import com.lucid47.soheeyagaja.contacts.ManagedContactGroup
+import com.lucid47.soheeyagaja.location.CustomerLocationRepository
+import com.lucid47.soheeyagaja.media.CustomerMediaRepository
+import java.io.File
+import android.net.Uri
 import com.lucid47.soheeyagaja.data.AppDatabase
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
 import com.lucid47.soheeyagaja.data.HistoryEntryRecord
+import com.lucid47.soheeyagaja.data.AudioMemoEntity
+import com.lucid47.soheeyagaja.data.PhotoMemoEntity
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,6 +69,8 @@ fun historyTitle(entry: HistoryEntryRecord): String = when (entry.type) {
     "PROCESS_STATUS" -> "프로세스 변경"
     ActivityRepository.VISIT_QUICK -> "방문"
     ActivityRepository.VISIT_TEXT_MEMO -> "텍스트 메모"
+    "PHOTO_MEMO" -> "사진 메모"
+    "AUDIO_MEMO" -> "음성 메모"
     else -> "고객 터치"
 }
 
@@ -91,6 +99,11 @@ data class CustomerManagementUiState(
     val managedContactGroups: List<ManagedContactGroup> = emptyList(),
     val contactToolsBusy: Boolean = false,
     val deleteManagedGroupId: Long? = null,
+    val mapVisible: Boolean = false,
+    val mapScheduleOnly: Boolean = false,
+    val mapBusy: Boolean = false,
+    val photoMemoCustomerId: Long? = null,
+    val audioMemoCustomerId: Long? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
 )
@@ -102,6 +115,8 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val activityRepository = ActivityRepository(database)
     private val dashboardRepository = DashboardRepository(database)
     private val contactService = AndroidContactService(application)
+    private val locationRepository = CustomerLocationRepository(application, database)
+    private val mediaRepository = CustomerMediaRepository(application, database)
     private val _uiState = MutableStateFlow(CustomerManagementUiState())
     val uiState = _uiState
 
@@ -226,6 +241,20 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         .distinctUntilChanged()
         .flatMapLatest { listId ->
             listId?.let { activityRepository.observeTodaySchedule(it) } ?: flowOf(emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val selectedCustomerPhotos = _uiState
+        .map { it.photoMemoCustomerId }
+        .distinctUntilChanged()
+        .flatMapLatest { customerId ->
+            customerId?.let(mediaRepository::observePhotos) ?: flowOf(emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val selectedCustomerAudio = _uiState
+        .map { it.audioMemoCustomerId }
+        .distinctUntilChanged()
+        .flatMapLatest { customerId ->
+            customerId?.let(mediaRepository::observeAudio) ?: flowOf(emptyList())
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
@@ -676,6 +705,95 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
                     _uiState.update { it.copy(contactToolsBusy = false, errorMessage = error.message) }
                 }
         }
+    }
+
+    fun openCustomerMap() {
+        _uiState.update { it.copy(mapVisible = true) }
+        geocodeVisibleCustomers()
+    }
+
+    fun closeCustomerMap() {
+        _uiState.update { it.copy(mapVisible = false) }
+    }
+
+    fun setMapScheduleOnly(scheduleOnly: Boolean) {
+        _uiState.update { it.copy(mapScheduleOnly = scheduleOnly) }
+    }
+
+    fun geocodeVisibleCustomers() {
+        _uiState.update { it.copy(mapBusy = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching { locationRepository.geocodeCustomers(allCustomers.value) }
+                .onSuccess { count ->
+                    _uiState.update {
+                        it.copy(mapBusy = false, statusMessage = if (count > 0) "${count}명의 주소를 지도 좌표로 변환했습니다." else it.statusMessage)
+                    }
+                }
+                .onFailure { error -> _uiState.update { it.copy(mapBusy = false, errorMessage = error.message) } }
+        }
+    }
+
+    fun recordQuickVisitWithLocation() {
+        val customerId = _uiState.value.visitPromptCustomerId ?: return
+        _uiState.update { it.copy(visitPromptCustomerId = null) }
+        viewModelScope.launch {
+            runCatching {
+                val address = locationRepository.currentAddress()
+                activityRepository.recordQuickVisit(customerId, address)
+            }.onSuccess {
+                _uiState.update { it.copy(statusMessage = "날짜·시간과 현재 장소를 방문 히스토리에 기록했습니다.") }
+            }.onFailure(::showError)
+        }
+    }
+
+    fun openPhotoMemo(customerId: Long) {
+        _uiState.update { it.copy(photoMemoCustomerId = customerId) }
+    }
+
+    fun closePhotoMemo() {
+        _uiState.update { it.copy(photoMemoCustomerId = null) }
+    }
+
+    fun createCameraFile(customerId: Long): File = mediaRepository.newCameraFile(customerId)
+
+    fun saveCapturedPhoto(customerId: Long, file: File) {
+        launchActivityAction("사진 메모를 저장했습니다.") {
+            mediaRepository.saveCapturedPhoto(customerId, file)
+        }
+    }
+
+    fun importPhotoMemos(customerId: Long, uris: List<Uri>) {
+        viewModelScope.launch {
+            runCatching { mediaRepository.importPhotos(customerId, uris) }
+                .onSuccess { count ->
+                    _uiState.update { it.copy(statusMessage = "사진 메모 ${count}장을 저장했습니다.") }
+                }
+                .onFailure(::showError)
+        }
+    }
+
+    fun openAudioMemo(customerId: Long) {
+        _uiState.update { it.copy(audioMemoCustomerId = customerId) }
+    }
+
+    fun closeAudioMemo() {
+        _uiState.update { it.copy(audioMemoCustomerId = null) }
+    }
+
+    fun createAudioFile(customerId: Long): File = mediaRepository.newAudioFile(customerId)
+
+    fun saveAudioMemo(customerId: Long, file: File, durationMillis: Long, transcript: String) {
+        launchActivityAction("음성 메모를 저장했습니다.") {
+            mediaRepository.saveAudioMemo(customerId, file, durationMillis, transcript)
+        }
+    }
+
+    fun deletePhotoMemo(photo: PhotoMemoEntity) {
+        launchActivityAction("사진 메모를 삭제했습니다.") { mediaRepository.deletePhoto(photo) }
+    }
+
+    fun deleteAudioMemo(audio: AudioMemoEntity) {
+        launchActivityAction("음성 메모를 삭제했습니다.") { mediaRepository.deleteAudio(audio) }
     }
 
     fun clearMessage() {

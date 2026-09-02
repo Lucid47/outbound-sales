@@ -67,6 +67,7 @@ import com.lucid47.soheeyagaja.customers.historyTitle
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.HistoryEntryRecord
 import com.lucid47.soheeyagaja.data.ScheduledCustomerRecord
+import com.lucid47.soheeyagaja.media.HistoryMediaPreview
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -460,6 +461,7 @@ private fun HistoryEntryCard(entry: HistoryEntryRecord, onClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HistoryMediaPreview(entry, Modifier.fillMaxWidth().height(112.dp))
             }
         }
     }

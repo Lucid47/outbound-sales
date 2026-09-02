@@ -47,6 +47,9 @@ data class CustomerEntity(
     val notes: String,
     val status: String = "OPEN",
     val dashboardStatusId: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val geocodedAtEpochMillis: Long? = null,
     val contactIdentifier: String? = null,
     val contactRegisteredName: String? = null,
     val duplicateKey: String,
@@ -92,6 +95,49 @@ data class ProcessStatusLogEntity(
     val previousStatusName: String?,
     val nextStatusId: String,
     val nextStatusName: String,
+    val createdAtEpochMillis: Long,
+)
+
+@Entity(
+    tableName = "photo_memos",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("customerId"), Index("listId"), Index("createdAtEpochMillis")],
+)
+data class PhotoMemoEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val listId: Long,
+    val customerId: Long,
+    val filePath: String,
+    val originalName: String,
+    val createdAtEpochMillis: Long,
+)
+
+@Entity(
+    tableName = "audio_memos",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("customerId"), Index("listId"), Index("createdAtEpochMillis")],
+)
+data class AudioMemoEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val listId: Long,
+    val customerId: Long,
+    val filePath: String,
+    val durationMillis: Long,
+    val transcript: String,
     val createdAtEpochMillis: Long,
 )
 
@@ -231,6 +277,9 @@ data class HistoryEntryRecord(
     val result: String,
     val detail: String,
     val occurredAtEpochMillis: Long,
+    val mediaType: String? = null,
+    val mediaPath: String? = null,
+    val durationMillis: Long? = null,
 )
 
 data class ScheduledCustomerRecord(

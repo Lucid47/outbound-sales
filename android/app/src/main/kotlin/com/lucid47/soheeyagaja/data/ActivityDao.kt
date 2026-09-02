@@ -72,7 +72,10 @@ interface ActivityDao {
                contact_logs.type AS type,
                contact_logs.result AS result,
                COALESCE(contact_logs.messageBody, '') AS detail,
-               contact_logs.createdAtEpochMillis AS occurredAtEpochMillis
+               contact_logs.createdAtEpochMillis AS occurredAtEpochMillis,
+               NULL AS mediaType,
+               NULL AS mediaPath,
+               NULL AS durationMillis
         FROM contact_logs
         INNER JOIN customers ON customers.id = contact_logs.customerId
         WHERE contact_logs.listId = :listId
@@ -90,7 +93,10 @@ interface ActivityDao {
                    WHEN COALESCE(visit_logs.memo, '') != '' THEN visit_logs.memo
                    ELSE COALESCE(visit_logs.locationAddress, '')
                END AS detail,
-               visit_logs.visitedAtEpochMillis AS occurredAtEpochMillis
+               visit_logs.visitedAtEpochMillis AS occurredAtEpochMillis,
+               NULL AS mediaType,
+               NULL AS mediaPath,
+               NULL AS durationMillis
         FROM visit_logs
         INNER JOIN customers ON customers.id = visit_logs.customerId
         WHERE visit_logs.listId = :listId
@@ -104,10 +110,45 @@ interface ActivityDao {
                'CHANGED' AS result,
                COALESCE(process_status_logs.previousStatusName, '상태 없음') ||
                    ' → ' || process_status_logs.nextStatusName AS detail,
-               process_status_logs.createdAtEpochMillis AS occurredAtEpochMillis
+               process_status_logs.createdAtEpochMillis AS occurredAtEpochMillis,
+               NULL AS mediaType,
+               NULL AS mediaPath,
+               NULL AS durationMillis
         FROM process_status_logs
         INNER JOIN customers ON customers.id = process_status_logs.customerId
         WHERE process_status_logs.listId = :listId
+        UNION ALL
+        SELECT 'photo-' || photo_memos.id AS stableId,
+               photo_memos.listId AS listId,
+               photo_memos.customerId AS customerId,
+               customers.name AS customerName,
+               'VISIT' AS category,
+               'PHOTO_MEMO' AS type,
+               'SAVED' AS result,
+               photo_memos.originalName AS detail,
+               photo_memos.createdAtEpochMillis AS occurredAtEpochMillis,
+               'PHOTO' AS mediaType,
+               photo_memos.filePath AS mediaPath,
+               NULL AS durationMillis
+        FROM photo_memos
+        INNER JOIN customers ON customers.id = photo_memos.customerId
+        WHERE photo_memos.listId = :listId
+        UNION ALL
+        SELECT 'audio-' || audio_memos.id AS stableId,
+               audio_memos.listId AS listId,
+               audio_memos.customerId AS customerId,
+               customers.name AS customerName,
+               'VISIT' AS category,
+               'AUDIO_MEMO' AS type,
+               'SAVED' AS result,
+               audio_memos.transcript AS detail,
+               audio_memos.createdAtEpochMillis AS occurredAtEpochMillis,
+               'AUDIO' AS mediaType,
+               audio_memos.filePath AS mediaPath,
+               audio_memos.durationMillis AS durationMillis
+        FROM audio_memos
+        INNER JOIN customers ON customers.id = audio_memos.customerId
+        WHERE audio_memos.listId = :listId
         ORDER BY occurredAtEpochMillis DESC
         """,
     )
@@ -123,7 +164,10 @@ interface ActivityDao {
                contact_logs.type AS type,
                contact_logs.result AS result,
                COALESCE(contact_logs.messageBody, '') AS detail,
-               contact_logs.createdAtEpochMillis AS occurredAtEpochMillis
+               contact_logs.createdAtEpochMillis AS occurredAtEpochMillis,
+               NULL AS mediaType,
+               NULL AS mediaPath,
+               NULL AS durationMillis
         FROM contact_logs
         INNER JOIN customers ON customers.id = contact_logs.customerId
         WHERE contact_logs.customerId = :customerId
@@ -141,7 +185,10 @@ interface ActivityDao {
                    WHEN COALESCE(visit_logs.memo, '') != '' THEN visit_logs.memo
                    ELSE COALESCE(visit_logs.locationAddress, '')
                END AS detail,
-               visit_logs.visitedAtEpochMillis AS occurredAtEpochMillis
+               visit_logs.visitedAtEpochMillis AS occurredAtEpochMillis,
+               NULL AS mediaType,
+               NULL AS mediaPath,
+               NULL AS durationMillis
         FROM visit_logs
         INNER JOIN customers ON customers.id = visit_logs.customerId
         WHERE visit_logs.customerId = :customerId
@@ -155,10 +202,45 @@ interface ActivityDao {
                'CHANGED' AS result,
                COALESCE(process_status_logs.previousStatusName, '상태 없음') ||
                    ' → ' || process_status_logs.nextStatusName AS detail,
-               process_status_logs.createdAtEpochMillis AS occurredAtEpochMillis
+               process_status_logs.createdAtEpochMillis AS occurredAtEpochMillis,
+               NULL AS mediaType,
+               NULL AS mediaPath,
+               NULL AS durationMillis
         FROM process_status_logs
         INNER JOIN customers ON customers.id = process_status_logs.customerId
         WHERE process_status_logs.customerId = :customerId
+        UNION ALL
+        SELECT 'photo-' || photo_memos.id AS stableId,
+               photo_memos.listId AS listId,
+               photo_memos.customerId AS customerId,
+               customers.name AS customerName,
+               'VISIT' AS category,
+               'PHOTO_MEMO' AS type,
+               'SAVED' AS result,
+               photo_memos.originalName AS detail,
+               photo_memos.createdAtEpochMillis AS occurredAtEpochMillis,
+               'PHOTO' AS mediaType,
+               photo_memos.filePath AS mediaPath,
+               NULL AS durationMillis
+        FROM photo_memos
+        INNER JOIN customers ON customers.id = photo_memos.customerId
+        WHERE photo_memos.customerId = :customerId
+        UNION ALL
+        SELECT 'audio-' || audio_memos.id AS stableId,
+               audio_memos.listId AS listId,
+               audio_memos.customerId AS customerId,
+               customers.name AS customerName,
+               'VISIT' AS category,
+               'AUDIO_MEMO' AS type,
+               'SAVED' AS result,
+               audio_memos.transcript AS detail,
+               audio_memos.createdAtEpochMillis AS occurredAtEpochMillis,
+               'AUDIO' AS mediaType,
+               audio_memos.filePath AS mediaPath,
+               audio_memos.durationMillis AS durationMillis
+        FROM audio_memos
+        INNER JOIN customers ON customers.id = audio_memos.customerId
+        WHERE audio_memos.customerId = :customerId
         ORDER BY occurredAtEpochMillis DESC
         """,
     )
