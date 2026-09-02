@@ -40,5 +40,12 @@ native/**/*.xcodeproj/project.xcworkspace/
 native/**/*.xcodeproj/xcuserdata/
 native/**/build/
 
+# Android local/build output
+android/.gradle/
+android/local.properties
+android/**/build/
+android/**/.cxx/
+android/**/captures/
+
 # Group SMS private device-test evidence
 docs/test-results/private/
