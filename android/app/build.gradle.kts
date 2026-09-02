@@ -1,9 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("androidx.room")
 }
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use(::load)
+    }
+}
+
+val googleMapsApiKey = providers.environmentVariable("GOOGLE_MAPS_API_KEY").orNull
+    ?: localProperties.getProperty("GOOGLE_MAPS_API_KEY")
+    ?: "UNCONFIGURED"
 
 android {
     namespace = "com.lucid47.soheeyagaja"
@@ -17,10 +30,11 @@ android {
         applicationId = "com.lucid47.soheeyagaja"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.8.0"
+        versionCode = 10
+        versionName = "0.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = googleMapsApiKey
     }
 
     buildTypes {
@@ -64,6 +78,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.room:room-ktx:2.8.4")
+    implementation("com.google.maps.android:maps-compose:8.2.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     ksp("androidx.room:room-compiler:2.8.4")
