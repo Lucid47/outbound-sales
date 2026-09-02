@@ -161,6 +161,8 @@ class ActivityRepository(private val database: AppDatabase) {
         const val TYPE_CALL_REJECTED = "CALL_REJECTED"
         const val TYPE_CALL_BLOCKED = "CALL_BLOCKED"
         const val TYPE_CALL_OTHER = "CALL_OTHER"
+        const val TYPE_SMS_INCOMING = "SMS_INCOMING"
+        const val TYPE_SMS_OUTGOING = "SMS_OUTGOING"
 
         const val RESULT_OPENED = "OPENED"
         const val RESULT_COMPLETED = "COMPLETED"

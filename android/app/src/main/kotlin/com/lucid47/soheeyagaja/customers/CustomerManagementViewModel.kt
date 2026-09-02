@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lucid47.soheeyagaja.activities.ActivityRepository
 import com.lucid47.soheeyagaja.callhistory.CallHistoryImportRepository
+import com.lucid47.soheeyagaja.messagehistory.MessageHistoryImportRepository
 import com.lucid47.soheeyagaja.dashboard.DashboardPaletteFamily
 import com.lucid47.soheeyagaja.dashboard.DashboardRepository
 import com.lucid47.soheeyagaja.contacts.AndroidContactService
@@ -70,6 +71,8 @@ fun historyTitle(entry: HistoryEntryRecord): String = when (entry.type) {
     ActivityRepository.TYPE_CALL_REJECTED -> "수신 거절"
     ActivityRepository.TYPE_CALL_BLOCKED -> "차단된 전화"
     ActivityRepository.TYPE_CALL_OTHER -> "통화 기록"
+    ActivityRepository.TYPE_SMS_INCOMING -> "받은 문자"
+    ActivityRepository.TYPE_SMS_OUTGOING -> "보낸 문자"
     ActivityRepository.TYPE_MANUAL_SMS -> "문자 시도"
     ActivityRepository.TYPE_NOTE -> "텍스트 메모"
     ActivityRepository.TYPE_STATUS_COMPLETE -> "완료 처리"
@@ -105,6 +108,8 @@ data class CustomerManagementUiState(
     val backupToolsVisible: Boolean = false,
     val callHistoryToolsVisible: Boolean = false,
     val callHistoryBusy: Boolean = false,
+    val messageHistoryToolsVisible: Boolean = false,
+    val messageHistoryBusy: Boolean = false,
     val groupMessageVisible: Boolean = false,
     val contactPrefixEnabled: Boolean = true,
     val contactPrefix: String = "#",
@@ -126,6 +131,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val repository = CustomerManagementRepository(database)
     private val activityRepository = ActivityRepository(database)
     private val callHistoryRepository = CallHistoryImportRepository(application, database)
+    private val messageHistoryRepository = MessageHistoryImportRepository(application, database)
     private val dashboardRepository = DashboardRepository(database)
     private val contactService = AndroidContactService(application)
     private val locationRepository = CustomerLocationRepository(application, database)
@@ -133,8 +139,8 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val audioTranscriber = RecordedAudioTranscriber(application)
     private val _uiState = MutableStateFlow(CustomerManagementUiState())
     val uiState = _uiState
-    private val _transcribingAudioIds = MutableStateFlow<Set<Long>>(emptySet())
-    val transcribingAudioIds = _transcribingAudioIds
+    private val _audioTranscriptionProgress = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val audioTranscriptionProgress = _audioTranscriptionProgress
 
     val customerLists = repository.observeCustomerLists().stateIn(
         scope = viewModelScope,
@@ -716,6 +722,44 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         }
     }
 
+    fun openMessageHistoryTools() {
+        if (_uiState.value.selectedListId == null) {
+            showError(IllegalStateException("문자기록을 연결할 고객리스트를 먼저 선택해주세요."))
+            return
+        }
+        _uiState.update { it.copy(messageHistoryToolsVisible = true) }
+    }
+
+    fun closeMessageHistoryTools() {
+        if (_uiState.value.messageHistoryBusy) return
+        _uiState.update { it.copy(messageHistoryToolsVisible = false) }
+    }
+
+    fun importDeviceMessageHistory(days: Int?) {
+        val listId = _uiState.value.selectedListId ?: return
+        _uiState.update { it.copy(messageHistoryBusy = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching { messageHistoryRepository.importDeviceMessages(listId, days) }
+                .onSuccess { result ->
+                    _uiState.update {
+                        it.copy(messageHistoryBusy = false, statusMessage = result.summary(), errorMessage = null)
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            messageHistoryBusy = false,
+                            errorMessage = error.message ?: "문자기록을 가져오지 못했습니다.",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun messageHistoryPermissionDenied() {
+        _uiState.update { it.copy(errorMessage = "문자 읽기 권한이 없어 가져오기를 실행하지 못했습니다.") }
+    }
+
     fun openGroupMessage() {
         _uiState.update { it.copy(groupMessageVisible = true) }
     }
@@ -914,9 +958,13 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     }
 
     private suspend fun transcribeAudio(audioId: Long, file: File) {
-        if (audioId in _transcribingAudioIds.value) return
-        _transcribingAudioIds.update { it + audioId }
-        runCatching { audioTranscriber.transcribe(file) }
+        if (audioId in _audioTranscriptionProgress.value) return
+        _audioTranscriptionProgress.update { it + (audioId to "전사 준비 중...") }
+        runCatching {
+            audioTranscriber.transcribe(file) { progress ->
+                _audioTranscriptionProgress.update { it + (audioId to progress) }
+            }
+        }
             .onSuccess { transcript ->
                 mediaRepository.updateAudioTranscript(audioId, transcript)
                 _uiState.update { it.copy(statusMessage = "음성 메모 전사가 완료되었습니다.", errorMessage = null) }
@@ -926,7 +974,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
                     it.copy(errorMessage = "음성은 저장했지만 기기 내 자동 전사에 실패했습니다. ${error.message.orEmpty()}".trim())
                 }
             }
-        _transcribingAudioIds.update { it - audioId }
+        _audioTranscriptionProgress.update { it - audioId }
     }
 
     fun deletePhotoMemo(photo: PhotoMemoEntity) {

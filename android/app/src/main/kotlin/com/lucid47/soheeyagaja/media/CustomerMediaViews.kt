@@ -340,7 +340,7 @@ fun AudioMemoDialog(
 ) {
     val context = LocalContext.current
     val entries by viewModel.selectedCustomerAudio.collectAsStateWithLifecycle()
-    val transcribingIds by viewModel.transcribingAudioIds.collectAsStateWithLifecycle()
+    val transcriptionProgress by viewModel.audioTranscriptionProgress.collectAsStateWithLifecycle()
     val recording by VoiceRecordingService.state.collectAsStateWithLifecycle()
     var transcript by remember { mutableStateOf("") }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -386,7 +386,9 @@ fun AudioMemoDialog(
                             value = transcript,
                             onValueChange = { transcript = it },
                             label = { Text("메모 (선택)") },
-                            supportingText = { Text("비워두면 저장 후 기기 내 음성 인식으로 자동 전사합니다.") },
+                            supportingText = {
+                                Text("비워두면 저장 후 기기 내에서 자동 전사합니다. 최초 1회 한국어 모델 약 82MB를 내려받습니다.")
+                            },
                             minLines = 3,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -412,7 +414,7 @@ fun AudioMemoDialog(
                 items(entries, key = AudioMemoEntity::id) { entry ->
                     AudioMemoRow(
                         entry = entry,
-                        isTranscribing = entry.id in transcribingIds,
+                        transcriptionProgress = transcriptionProgress[entry.id],
                         onRetryTranscription = { viewModel.retryAudioTranscription(entry) },
                         onDelete = { viewModel.deleteAudioMemo(entry) },
                     )
@@ -460,7 +462,7 @@ private fun RecordingControls(
 @Composable
 private fun AudioMemoRow(
     entry: AudioMemoEntity,
-    isTranscribing: Boolean,
+    transcriptionProgress: String?,
     onRetryTranscription: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -494,7 +496,7 @@ private fun AudioMemoRow(
                 Column(Modifier.weight(1f)) {
                     Text(
                         when {
-                            isTranscribing -> "기기 내 자동 전사 중..."
+                            transcriptionProgress != null -> transcriptionProgress
                             entry.transcript.isBlank() -> "전사 없음"
                             else -> entry.transcript
                         },
@@ -503,7 +505,7 @@ private fun AudioMemoRow(
                     )
                     Text(formatDuration(entry.durationMillis), style = MaterialTheme.typography.bodySmall)
                 }
-                if (entry.transcript.isBlank() && !isTranscribing) {
+                if (entry.transcript.isBlank() && transcriptionProgress == null) {
                     TextButton(onClick = onRetryTranscription) { Text("전사 재시도") }
                 }
                 IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "삭제") }

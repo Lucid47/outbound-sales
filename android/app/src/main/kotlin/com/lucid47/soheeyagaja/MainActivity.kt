@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Download
@@ -69,6 +70,7 @@ import com.lucid47.soheeyagaja.contacts.ContactImportDialog
 import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
 import com.lucid47.soheeyagaja.contacts.ContactToolsDialog
 import com.lucid47.soheeyagaja.callhistory.CallHistoryToolsDialog
+import com.lucid47.soheeyagaja.messagehistory.MessageHistoryToolsDialog
 import com.lucid47.soheeyagaja.backup.BackupToolsDialog
 import com.lucid47.soheeyagaja.activities.HistoryActivityScreen
 import com.lucid47.soheeyagaja.activities.TodayActivityScreen
@@ -193,7 +195,7 @@ private fun SettingsSummaryScreen(
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.9.1")
+                        Text("소희야 가자 Android 0.9.2")
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }
@@ -216,6 +218,14 @@ private fun SettingsSummaryScreen(
             }
             item {
                 Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = viewModel::openMessageHistoryTools, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.Message, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("문자기록 가져오기")
+                }
+            }
+            item {
+                Spacer(Modifier.height(10.dp))
                 OutlinedButton(onClick = viewModel::openBackupTools, modifier = Modifier.fillMaxWidth().height(54.dp)) {
                     Icon(Icons.Default.CloudSync, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
@@ -232,6 +242,13 @@ private fun SettingsSummaryScreen(
     }
     if (state.callHistoryToolsVisible) {
         CallHistoryToolsDialog(viewModel = viewModel, customerLists = lists, onDismiss = viewModel::closeCallHistoryTools)
+    }
+    if (state.messageHistoryToolsVisible) {
+        MessageHistoryToolsDialog(
+            viewModel = viewModel,
+            customerLists = lists,
+            onDismiss = viewModel::closeMessageHistoryTools,
+        )
     }
 }
 
