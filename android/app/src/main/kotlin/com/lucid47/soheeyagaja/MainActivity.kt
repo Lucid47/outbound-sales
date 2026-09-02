@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.lucid47.soheeyagaja.contacts.ContactImportDialog
 import com.lucid47.soheeyagaja.contacts.ContactImportSourcePanel
+import com.lucid47.soheeyagaja.contacts.ContactToolsDialog
 import com.lucid47.soheeyagaja.activities.HistoryActivityScreen
 import com.lucid47.soheeyagaja.activities.TodayActivityScreen
 import com.lucid47.soheeyagaja.data.CustomerListSummary
@@ -160,14 +162,19 @@ private fun SoheeyaGajaApp(
                 modifier = modifier,
             )
             RootTab.HISTORY -> HistoryActivityScreen(customerViewModel, modifier)
-            RootTab.SETTINGS -> SettingsSummaryScreen(managementLists, modifier)
+            RootTab.SETTINGS -> SettingsSummaryScreen(customerViewModel, managementLists, modifier)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsSummaryScreen(lists: List<CustomerListSummary>, modifier: Modifier) {
+private fun SettingsSummaryScreen(
+    viewModel: CustomerManagementViewModel,
+    lists: List<CustomerListSummary>,
+    modifier: Modifier,
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text("설정", fontWeight = FontWeight.Bold) }) }) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -187,7 +194,18 @@ private fun SettingsSummaryScreen(lists: List<CustomerListSummary>, modifier: Mo
                     }
                 }
             }
+            item {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = viewModel::openContactTools, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                    Icon(Icons.Default.Contacts, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("연락처 내보내기 및 정리")
+                }
+            }
         }
+    }
+    if (state.contactToolsVisible) {
+        ContactToolsDialog(viewModel = viewModel, customerLists = lists, onDismiss = viewModel::closeContactTools)
     }
 }
 

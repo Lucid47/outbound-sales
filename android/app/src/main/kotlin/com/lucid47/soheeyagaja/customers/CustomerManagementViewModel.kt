@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.lucid47.soheeyagaja.activities.ActivityRepository
 import com.lucid47.soheeyagaja.dashboard.DashboardPaletteFamily
 import com.lucid47.soheeyagaja.dashboard.DashboardRepository
+import com.lucid47.soheeyagaja.contacts.AndroidContactService
+import com.lucid47.soheeyagaja.contacts.ManagedContactGroup
 import com.lucid47.soheeyagaja.data.AppDatabase
 import com.lucid47.soheeyagaja.data.CustomerListSummary
 import com.lucid47.soheeyagaja.data.CustomerWithFields
@@ -83,6 +85,12 @@ data class CustomerManagementUiState(
     val historyEndEpochDay: Long = LocalDate.now().toEpochDay(),
     val dashboardVisible: Boolean = false,
     val dashboardSettingsVisible: Boolean = false,
+    val contactToolsVisible: Boolean = false,
+    val contactPrefixEnabled: Boolean = true,
+    val contactPrefix: String = "#",
+    val managedContactGroups: List<ManagedContactGroup> = emptyList(),
+    val contactToolsBusy: Boolean = false,
+    val deleteManagedGroupId: Long? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
 )
@@ -93,6 +101,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val repository = CustomerManagementRepository(database)
     private val activityRepository = ActivityRepository(database)
     private val dashboardRepository = DashboardRepository(database)
+    private val contactService = AndroidContactService(application)
     private val _uiState = MutableStateFlow(CustomerManagementUiState())
     val uiState = _uiState
 
@@ -576,6 +585,96 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     fun setDashboardLegendVisible(visible: Boolean) {
         viewModelScope.launch {
             runCatching { dashboardRepository.setLegendVisible(visible) }.onFailure(::showError)
+        }
+    }
+
+    fun openContactTools() {
+        _uiState.update { it.copy(contactToolsVisible = true) }
+        refreshManagedContactGroups()
+    }
+
+    fun closeContactTools() {
+        _uiState.update { it.copy(contactToolsVisible = false, deleteManagedGroupId = null) }
+    }
+
+    fun setContactPrefixEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(contactPrefixEnabled = enabled) }
+    }
+
+    fun updateContactPrefix(prefix: String) {
+        _uiState.update { it.copy(contactPrefix = prefix.take(4)) }
+    }
+
+    fun refreshManagedContactGroups() {
+        _uiState.update { it.copy(contactToolsBusy = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching { contactService.managedGroups() }
+                .onSuccess { groups ->
+                    _uiState.update { it.copy(managedContactGroups = groups, contactToolsBusy = false) }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(contactToolsBusy = false, errorMessage = error.message) }
+                }
+        }
+    }
+
+    fun exportSelectedListToContacts() {
+        val state = _uiState.value
+        val list = customerLists.value.firstOrNull { it.id == state.selectedListId }
+        if (list == null) {
+            showError(IllegalStateException("내보낼 고객리스트를 선택해주세요."))
+            return
+        }
+        val records = allCustomers.value
+        _uiState.update { it.copy(contactToolsBusy = true, errorMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                contactService.exportCustomerGroup(
+                    listId = list.id,
+                    listName = list.name,
+                    customers = records,
+                    prefixEnabled = state.contactPrefixEnabled,
+                    prefix = state.contactPrefix,
+                )
+            }.onSuccess { result ->
+                _uiState.update {
+                    it.copy(
+                        contactToolsBusy = false,
+                        statusMessage = "${result.exportedCount}명을 연락처 그룹으로 등록했습니다.",
+                    )
+                }
+                refreshManagedContactGroups()
+            }.onFailure { error ->
+                _uiState.update { it.copy(contactToolsBusy = false, errorMessage = error.message) }
+            }
+        }
+    }
+
+    fun requestManagedGroupDelete(groupId: Long) {
+        _uiState.update { it.copy(deleteManagedGroupId = groupId) }
+    }
+
+    fun cancelManagedGroupDelete() {
+        _uiState.update { it.copy(deleteManagedGroupId = null) }
+    }
+
+    fun confirmManagedGroupDelete() {
+        val groupId = _uiState.value.deleteManagedGroupId ?: return
+        _uiState.update { it.copy(contactToolsBusy = true, deleteManagedGroupId = null) }
+        viewModelScope.launch {
+            runCatching { contactService.deleteManagedGroup(groupId, deleteContacts = true) }
+                .onSuccess { deletedCount ->
+                    _uiState.update {
+                        it.copy(
+                            contactToolsBusy = false,
+                            statusMessage = "연락처 그룹과 앱이 등록한 ${deletedCount}명을 삭제했습니다.",
+                        )
+                    }
+                    refreshManagedContactGroups()
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(contactToolsBusy = false, errorMessage = error.message) }
+                }
         }
     }
 
