@@ -31,6 +31,9 @@ interface AttachmentDao {
     @Query("DELETE FROM audio_memos WHERE id = :id")
     suspend fun deleteAudio(id: Long)
 
+    @Query("UPDATE audio_memos SET transcript = :transcript WHERE id = :id")
+    suspend fun updateAudioTranscript(id: Long, transcript: String)
+
     @Query("SELECT COUNT(*) FROM photo_memos WHERE customerId = :customerId")
     suspend fun countPhotos(customerId: Long): Long
 

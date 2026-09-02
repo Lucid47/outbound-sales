@@ -48,10 +48,10 @@ class ActivityRepository(private val database: AppDatabase) {
         database.customerListDao().touch(customer.listId, now)
     }
 
-    suspend fun recordQuickVisit(customerId: Long, locationAddress: String? = null) = database.withTransaction {
+    suspend fun recordQuickVisit(customerId: Long, locationAddress: String? = null): Long = database.withTransaction {
         val customer = requireCustomer(customerId)
         val now = System.currentTimeMillis()
-        database.activityDao().insertVisitLog(
+        val visitLogId = database.activityDao().insertVisitLog(
             VisitLogEntity(
                 listId = customer.listId,
                 customerId = customer.id,
@@ -63,6 +63,11 @@ class ActivityRepository(private val database: AppDatabase) {
             ),
         )
         database.customerListDao().touch(customer.listId, now)
+        visitLogId
+    }
+
+    suspend fun updateQuickVisitLocation(visitLogId: Long, address: String) {
+        database.activityDao().updateVisitLocation(visitLogId, address.trim())
     }
 
     suspend fun setCustomerCompleted(customerId: Long, completed: Boolean) = database.withTransaction {

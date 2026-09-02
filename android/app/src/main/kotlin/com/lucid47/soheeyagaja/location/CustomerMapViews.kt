@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -18,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -29,9 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -41,7 +47,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerComposable
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.lucid47.soheeyagaja.customers.CustomerManagementViewModel
@@ -63,6 +69,10 @@ fun CustomerMapDialog(
     val scheduledIds = schedule.mapTo(hashSetOf()) { it.customerId }
     val lastTouchByCustomer = history.groupBy { it.customerId }
         .mapValues { (_, entries) -> entries.maxOfOrNull { it.occurredAtEpochMillis } }
+    val visitCountByCustomer = history.asSequence()
+        .filter { it.type == "QUICK_LOCATION" }
+        .groupingBy { it.customerId }
+        .eachCount()
     val eligibleCustomers = customers.filter { record ->
         !state.mapScheduleOnly || record.customer.id in scheduledIds
     }
@@ -120,6 +130,7 @@ fun CustomerMapDialog(
                 GoogleCustomerMap(
                     customers = visibleCustomers,
                     lastTouchByCustomer = lastTouchByCustomer,
+                    visitCountByCustomer = visitCountByCustomer,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -131,6 +142,7 @@ fun CustomerMapDialog(
 private fun GoogleCustomerMap(
     customers: List<CustomerWithFields>,
     lastTouchByCustomer: Map<Long, Long?>,
+    visitCountByCustomer: Map<Long, Int>,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -190,11 +202,30 @@ private fun GoogleCustomerMap(
             } ?: "기록 없음"
 
             key(customer.id) {
-                Marker(
+                MarkerComposable(
+                    keys = arrayOf(customer.name, (visitCountByCustomer[customer.id] ?: 0).toString()),
                     state = rememberUpdatedMarkerState(position = LatLng(latitude, longitude)),
+                    anchor = Offset(0.5f, 1f),
                     title = customer.name,
                     snippet = "$lastTouch\n${customer.address}",
-                )
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Text(
+                                text = "${customer.name} · 방문 ${visitCountByCustomer[customer.id] ?: 0}회",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Box(Modifier.size(width = 3.dp, height = 9.dp).background(MaterialTheme.colorScheme.primary))
+                    }
+                }
             }
         }
     }

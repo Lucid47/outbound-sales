@@ -14,6 +14,9 @@ interface ActivityDao {
     @Insert
     suspend fun insertVisitLog(log: VisitLogEntity): Long
 
+    @Query("UPDATE visit_logs SET locationAddress = :address WHERE id = :visitLogId")
+    suspend fun updateVisitLocation(visitLogId: Long, address: String)
+
     @Insert
     suspend fun insertSchedule(schedule: VisitScheduleEntity): Long
 

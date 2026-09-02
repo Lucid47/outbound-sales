@@ -10,6 +10,7 @@ import com.lucid47.soheeyagaja.contacts.AndroidContactService
 import com.lucid47.soheeyagaja.contacts.ManagedContactGroup
 import com.lucid47.soheeyagaja.location.CustomerLocationRepository
 import com.lucid47.soheeyagaja.media.CustomerMediaRepository
+import com.lucid47.soheeyagaja.media.RecordedAudioTranscriber
 import java.io.File
 import android.net.Uri
 import com.lucid47.soheeyagaja.data.AppDatabase
@@ -119,8 +120,11 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     private val contactService = AndroidContactService(application)
     private val locationRepository = CustomerLocationRepository(application, database)
     private val mediaRepository = CustomerMediaRepository(application, database)
+    private val audioTranscriber = RecordedAudioTranscriber(application)
     private val _uiState = MutableStateFlow(CustomerManagementUiState())
     val uiState = _uiState
+    private val _transcribingAudioIds = MutableStateFlow<Set<Long>>(emptySet())
+    val transcribingAudioIds = _transcribingAudioIds
 
     val customerLists = repository.observeCustomerLists().stateIn(
         scope = viewModelScope,
@@ -471,7 +475,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         val customerId = _uiState.value.visitPromptCustomerId ?: return
         _uiState.update { it.copy(visitPromptCustomerId = null) }
         launchActivityAction("방문 히스토리를 기록했습니다.") {
-            activityRepository.recordQuickVisit(customerId)
+            activityRepository.recordQuickVisit(customerId, "위치 권한 없음")
         }
     }
 
@@ -763,10 +767,23 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         _uiState.update { it.copy(visitPromptCustomerId = null) }
         viewModelScope.launch {
             runCatching {
+                val visitLogId = activityRepository.recordQuickVisit(customerId, "현재 장소 확인 중")
+                _uiState.update {
+                    it.copy(statusMessage = "방문 시간을 기록했습니다. 현재 장소를 확인하고 있습니다.", errorMessage = null)
+                }
                 val address = locationRepository.currentAddress()
-                activityRepository.recordQuickVisit(customerId, address)
-            }.onSuccess {
-                _uiState.update { it.copy(statusMessage = "날짜·시간과 현재 장소를 방문 히스토리에 기록했습니다.") }
+                activityRepository.updateQuickVisitLocation(visitLogId, address ?: "장소 확인 실패")
+                address
+            }.onSuccess { address ->
+                _uiState.update {
+                    it.copy(
+                        statusMessage = if (address == null) {
+                            "방문 시간은 기록했지만 현재 장소를 확인하지 못했습니다."
+                        } else {
+                            "날짜·시간과 현재 장소를 방문 히스토리에 기록했습니다."
+                        },
+                    )
+                }
             }.onFailure(::showError)
         }
     }
@@ -808,9 +825,39 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     fun createAudioFile(customerId: Long): File = mediaRepository.newAudioFile(customerId)
 
     fun saveAudioMemo(customerId: Long, file: File, durationMillis: Long, transcript: String) {
-        launchActivityAction("음성 메모를 저장했습니다.") {
-            mediaRepository.saveAudioMemo(customerId, file, durationMillis, transcript)
+        viewModelScope.launch {
+            runCatching { mediaRepository.saveAudioMemo(customerId, file, durationMillis, transcript) }
+                .onSuccess { audioId ->
+                    _uiState.update {
+                        it.copy(
+                            statusMessage = if (transcript.isBlank()) "음성 메모를 저장했습니다. 기기 내 자동 전사를 시작합니다." else "음성 메모를 저장했습니다.",
+                            errorMessage = null,
+                        )
+                    }
+                    if (transcript.isBlank()) transcribeAudio(audioId, file)
+                }
+                .onFailure(::showError)
         }
+    }
+
+    fun retryAudioTranscription(audio: AudioMemoEntity) {
+        viewModelScope.launch { transcribeAudio(audio.id, File(audio.filePath)) }
+    }
+
+    private suspend fun transcribeAudio(audioId: Long, file: File) {
+        if (audioId in _transcribingAudioIds.value) return
+        _transcribingAudioIds.update { it + audioId }
+        runCatching { audioTranscriber.transcribe(file) }
+            .onSuccess { transcript ->
+                mediaRepository.updateAudioTranscript(audioId, transcript)
+                _uiState.update { it.copy(statusMessage = "음성 메모 전사가 완료되었습니다.", errorMessage = null) }
+            }
+            .onFailure { error ->
+                _uiState.update {
+                    it.copy(errorMessage = "음성은 저장했지만 기기 내 자동 전사에 실패했습니다. ${error.message.orEmpty()}".trim())
+                }
+            }
+        _transcribingAudioIds.update { it - audioId }
     }
 
     fun deletePhotoMemo(photo: PhotoMemoEntity) {

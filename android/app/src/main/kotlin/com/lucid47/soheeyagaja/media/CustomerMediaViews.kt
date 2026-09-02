@@ -101,10 +101,26 @@ fun PhotoMemoDialog(
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
     var pendingImports by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var viewerPhoto by remember { mutableStateOf<PhotoMemoEntity?>(null) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
         val file = pendingCameraFile
         if (saved && file != null) viewModel.saveCapturedPhoto(customerId, file) else file?.delete()
         pendingCameraFile = null
+    }
+    fun launchCamera() {
+        runCatching {
+            val file = viewModel.createCameraFile(customerId)
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+            pendingCameraFile = file
+            camera.launch(uri)
+        }.onFailure { error ->
+            pendingCameraFile?.delete()
+            pendingCameraFile = null
+            cameraError = error.message ?: "카메라를 실행하지 못했습니다."
+        }
+    }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) launchCamera() else cameraError = "사진 촬영을 위해 카메라 권한을 허용해주세요."
     }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         pendingImports = uris
@@ -131,9 +147,11 @@ fun PhotoMemoDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = {
-                            val file = viewModel.createCameraFile(customerId)
-                            pendingCameraFile = file
-                            camera.launch(FileProvider.getUriForFile(context, "${context.packageName}.files", file))
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                launchCamera()
+                            } else {
+                                cameraPermission.launch(Manifest.permission.CAMERA)
+                            }
                         },
                         modifier = Modifier.weight(1f).height(56.dp),
                     ) {
@@ -184,6 +202,14 @@ fun PhotoMemoDialog(
                 }) { Text("추가") }
             },
             dismissButton = { TextButton(onClick = { pendingImports = emptyList() }) { Text("취소") } },
+        )
+    }
+    cameraError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { cameraError = null },
+            title = { Text("카메라 실행 오류") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { cameraError = null }) { Text("확인") } },
         )
     }
     viewerPhoto?.let { photo ->
@@ -314,6 +340,7 @@ fun AudioMemoDialog(
 ) {
     val context = LocalContext.current
     val entries by viewModel.selectedCustomerAudio.collectAsStateWithLifecycle()
+    val transcribingIds by viewModel.transcribingAudioIds.collectAsStateWithLifecycle()
     val recording by VoiceRecordingService.state.collectAsStateWithLifecycle()
     var transcript by remember { mutableStateOf("") }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -358,8 +385,8 @@ fun AudioMemoDialog(
                         OutlinedTextField(
                             value = transcript,
                             onValueChange = { transcript = it },
-                            label = { Text("전사 또는 메모") },
-                            supportingText = { Text("기기에서 만든 전사문이 있다면 붙여넣거나 내용을 직접 입력할 수 있습니다.") },
+                            label = { Text("메모 (선택)") },
+                            supportingText = { Text("비워두면 저장 후 기기 내 음성 인식으로 자동 전사합니다.") },
                             minLines = 3,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -383,7 +410,12 @@ fun AudioMemoDialog(
                 item { Text("최근 음성 ${entries.size}개", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 if (entries.isEmpty()) item { Text("저장된 음성 메모가 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(entries, key = AudioMemoEntity::id) { entry ->
-                    AudioMemoRow(entry = entry, onDelete = { viewModel.deleteAudioMemo(entry) })
+                    AudioMemoRow(
+                        entry = entry,
+                        isTranscribing = entry.id in transcribingIds,
+                        onRetryTranscription = { viewModel.retryAudioTranscription(entry) },
+                        onDelete = { viewModel.deleteAudioMemo(entry) },
+                    )
                 }
             }
         }
@@ -426,7 +458,12 @@ private fun RecordingControls(
 }
 
 @Composable
-private fun AudioMemoRow(entry: AudioMemoEntity, onDelete: () -> Unit) {
+private fun AudioMemoRow(
+    entry: AudioMemoEntity,
+    isTranscribing: Boolean,
+    onRetryTranscription: () -> Unit,
+    onDelete: () -> Unit,
+) {
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -455,8 +492,19 @@ private fun AudioMemoRow(entry: AudioMemoEntity, onDelete: () -> Unit) {
                     if (current.isPlaying) { current.pause(); playing = false } else { current.start(); playing = true }
                 }) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, "재생/일시정지") }
                 Column(Modifier.weight(1f)) {
-                    Text(entry.transcript.ifBlank { "전사 없음" }, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        when {
+                            isTranscribing -> "기기 내 자동 전사 중..."
+                            entry.transcript.isBlank() -> "전사 없음"
+                            else -> entry.transcript
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(formatDuration(entry.durationMillis), style = MaterialTheme.typography.bodySmall)
+                }
+                if (entry.transcript.isBlank() && !isTranscribing) {
+                    TextButton(onClick = onRetryTranscription) { Text("전사 재시도") }
                 }
                 IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "삭제") }
             }

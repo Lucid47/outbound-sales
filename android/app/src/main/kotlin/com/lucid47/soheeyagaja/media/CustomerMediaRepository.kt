@@ -89,6 +89,10 @@ class CustomerMediaRepository(
         File(audio.filePath).delete()
     }
 
+    suspend fun updateAudioTranscript(audioId: Long, transcript: String) = withContext(Dispatchers.IO) {
+        database.attachmentDao().updateAudioTranscript(audioId, transcript.trim())
+    }
+
     suspend fun customerIdsInList(listId: Long): List<Long> = withContext(Dispatchers.IO) {
         database.customerDao().idsByList(listId)
     }

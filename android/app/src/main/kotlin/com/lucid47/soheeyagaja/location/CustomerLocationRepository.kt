@@ -17,6 +17,7 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class CustomerLocationRepository(
     private val context: Context,
@@ -59,10 +60,20 @@ class CustomerLocationRepository(
     private suspend fun currentLocation(): Location? {
         check(hasLocationPermission()) { "방문 위치를 기록하려면 위치 권한이 필요합니다." }
         val manager = context.getSystemService(LocationManager::class.java)
-        val provider = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-            .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
-            ?: return null
-        return suspendCancellableCoroutine { continuation ->
+        val enabledProviders = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+            .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+        enabledProviders.forEach { provider ->
+            val fresh = withTimeoutOrNull(LOCATION_TIMEOUT_MILLIS) { requestCurrentLocation(manager, provider) }
+            if (fresh != null) return fresh
+        }
+        return listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+            .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .maxByOrNull(Location::getTime)
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun requestCurrentLocation(manager: LocationManager, provider: String): Location? =
+        suspendCancellableCoroutine { continuation ->
             val signal = CancellationSignal()
             continuation.invokeOnCancellation { signal.cancel() }
             LocationManagerCompat.getCurrentLocation(
@@ -74,9 +85,12 @@ class CustomerLocationRepository(
                 if (continuation.isActive) continuation.resume(location)
             }
         }
-    }
 
     private fun hasLocationPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private companion object {
+        const val LOCATION_TIMEOUT_MILLIS = 8_000L
+    }
 }
