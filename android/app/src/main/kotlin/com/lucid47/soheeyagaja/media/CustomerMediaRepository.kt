@@ -89,6 +89,17 @@ class CustomerMediaRepository(
         File(audio.filePath).delete()
     }
 
+    suspend fun customerIdsInList(listId: Long): List<Long> = withContext(Dispatchers.IO) {
+        database.customerDao().idsByList(listId)
+    }
+
+    suspend fun deleteCustomerFiles(customerIds: Collection<Long>) = withContext(Dispatchers.IO) {
+        customerIds.forEach { customerId ->
+            File(context.filesDir, "media/photos/$customerId").deleteRecursively()
+            File(context.filesDir, "media/audio/$customerId").deleteRecursively()
+        }
+    }
+
     private suspend fun savePhotoMetadata(customerId: Long, file: File, originalName: String): Long =
         database.withTransaction {
             val customer = requireNotNull(database.customerDao().getById(customerId)) { "고객을 찾지 못했습니다." }

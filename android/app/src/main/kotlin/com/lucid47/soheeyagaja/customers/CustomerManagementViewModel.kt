@@ -369,7 +369,10 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     fun confirmCustomerDelete() {
         val customerId = _uiState.value.deleteCustomerId ?: return
         viewModelScope.launch {
-            runCatching { repository.deleteCustomer(customerId) }
+            runCatching {
+                repository.deleteCustomer(customerId)
+                mediaRepository.deleteCustomerFiles(listOf(customerId))
+            }
                 .onSuccess {
                     _uiState.update {
                         it.copy(
@@ -420,7 +423,11 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     fun confirmListDelete() {
         val listId = _uiState.value.deleteListId ?: return
         viewModelScope.launch {
-            runCatching { repository.deleteCustomerList(listId) }
+            runCatching {
+                val customerIds = mediaRepository.customerIdsInList(listId)
+                repository.deleteCustomerList(listId)
+                mediaRepository.deleteCustomerFiles(customerIds)
+            }
                 .onSuccess {
                     _uiState.update {
                         it.copy(

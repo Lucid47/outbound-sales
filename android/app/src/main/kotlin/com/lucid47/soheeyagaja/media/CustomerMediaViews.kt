@@ -208,13 +208,56 @@ private fun PhotoThumbnail(path: String, modifier: Modifier = Modifier, onClick:
 
 @Composable
 fun HistoryMediaPreview(entry: HistoryEntryRecord, modifier: Modifier = Modifier) {
+    var viewerPath by remember(entry.mediaPath) { mutableStateOf<String?>(null) }
     if (entry.mediaType == "PHOTO" && !entry.mediaPath.isNullOrBlank()) {
-        PhotoThumbnail(entry.mediaPath, modifier = modifier, onClick = {})
+        PhotoThumbnail(entry.mediaPath, modifier = modifier, onClick = { viewerPath = entry.mediaPath })
     } else if (entry.mediaType == "AUDIO") {
         Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Mic, contentDescription = null)
             Spacer(Modifier.size(6.dp))
             Text(formatDuration(entry.durationMillis ?: 0L))
+        }
+    }
+    viewerPath?.let { path -> HistoryPhotoViewer(path = path, onDismiss = { viewerPath = null }) }
+}
+
+@Composable
+private fun HistoryPhotoViewer(path: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val bitmap = remember(path) { decodeBitmap(path, 2400) }
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            bitmap?.let {
+                Image(
+                    it.asImageBitmap(),
+                    contentDescription = "사진 메모",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            offsetX += pan.x
+                            offsetY += pan.y
+                        }
+                    }.graphicsLayer(scaleX = scale, scaleY = scale, translationX = offsetX, translationY = offsetY),
+                )
+            }
+            Row(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+                IconButton(onClick = {
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", File(path))
+                    context.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).setType("image/*")
+                                .putExtra(Intent.EXTRA_STREAM, uri)
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                            "사진 공유",
+                        ),
+                    )
+                }) { Icon(Icons.Default.Share, "공유", tint = Color.White) }
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "닫기", tint = Color.White) }
+            }
         }
     }
 }

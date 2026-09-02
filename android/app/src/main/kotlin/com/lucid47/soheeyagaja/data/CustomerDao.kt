@@ -68,6 +68,9 @@ interface CustomerDao {
     @Query("SELECT COUNT(*) FROM customers WHERE listId = :listId")
     suspend fun count(listId: Long): Long
 
+    @Query("SELECT id FROM customers WHERE listId = :listId")
+    suspend fun idsByList(listId: Long): List<Long>
+
     @Query("SELECT normalizedPhone FROM customers WHERE normalizedPhone != ''")
     suspend fun allNormalizedPhones(): List<String>
 }
