@@ -107,7 +107,7 @@ fun MessageHistoryToolsDialog(
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(selectedList?.name ?: "고객리스트 없음", fontWeight = FontWeight.Bold)
                             Text(
-                                "Galaxy 메시지 앱에 저장된 받은 문자와 보낸 문자를 읽어 고객 히스토리에 복사합니다. 이 화면에서는 문자를 보내지 않습니다.",
+                                "Galaxy 메시지 앱에 저장된 SMS와 MMS를 읽어 고객 히스토리에 복사합니다. 이 화면에서는 문자를 보내지 않습니다.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -156,7 +156,7 @@ fun MessageHistoryToolsDialog(
                                 Icon(Icons.Default.PrivacyTip, contentDescription = null)
                                 Spacer(Modifier.size(10.dp))
                                 Text(
-                                    "표준 SMS 문자만 가져옵니다. 채팅+ RCS와 사진·파일 첨부는 Android가 동일한 기록 접근을 제공하지 않아 제외됩니다.",
+                                    "SMS와 MMS의 본문을 가져오며 MMS 첨부 개수도 표시합니다. 채팅+ RCS 대화와 첨부 원본 파일은 Android가 표준 기록 접근을 제공하지 않아 제외됩니다.",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }

@@ -138,6 +138,7 @@ data class AudioMemoEntity(
     val filePath: String,
     val durationMillis: Long,
     val transcript: String,
+    val sourceType: String = "AUDIO_MEMO",
     val createdAtEpochMillis: Long,
 )
 

@@ -1,6 +1,7 @@
 package com.lucid47.soheeyagaja
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.UploadFile
@@ -82,6 +84,8 @@ import com.lucid47.soheeyagaja.importing.ContactImportUiState
 import com.lucid47.soheeyagaja.importing.ImportUiState
 import com.lucid47.soheeyagaja.importing.ImportViewModel
 import com.lucid47.soheeyagaja.ui.theme.SoheeyaGajaTheme
+import com.lucid47.soheeyagaja.transcript.SharedTranscriptImportDialog
+import com.lucid47.soheeyagaja.transcript.SharedTranscriptImportViewModel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -89,9 +93,11 @@ import java.time.format.DateTimeFormatter
 class MainActivity : ComponentActivity() {
     private val importViewModel: ImportViewModel by viewModels()
     private val customerViewModel: CustomerManagementViewModel by viewModels()
+    private val sharedTranscriptViewModel: SharedTranscriptImportViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        sharedTranscriptViewModel.acceptIntent(intent)
         enableEdgeToEdge()
         setContent {
             SoheeyaGajaTheme {
@@ -104,9 +110,16 @@ class MainActivity : ComponentActivity() {
                     importUiState = uiState,
                     contactUiState = contactUiState,
                     customerLists = customerLists,
+                    sharedTranscriptViewModel = sharedTranscriptViewModel,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedTranscriptViewModel.acceptIntent(intent)
     }
 }
 
@@ -128,9 +141,23 @@ private fun SoheeyaGajaApp(
     importUiState: ImportUiState,
     contactUiState: ContactImportUiState,
     customerLists: List<CustomerListSummary>,
+    sharedTranscriptViewModel: SharedTranscriptImportViewModel,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(RootTab.TODAY) }
     val managementLists by customerViewModel.customerLists.collectAsStateWithLifecycle()
+    val transcriptFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            sharedTranscriptViewModel.acceptIntent(
+                Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "*/*"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                },
+            )
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -168,9 +195,17 @@ private fun SoheeyaGajaApp(
                 modifier = modifier,
             )
             RootTab.HISTORY -> HistoryActivityScreen(customerViewModel, modifier)
-            RootTab.SETTINGS -> SettingsSummaryScreen(customerViewModel, managementLists, modifier)
+            RootTab.SETTINGS -> SettingsSummaryScreen(
+                viewModel = customerViewModel,
+                lists = managementLists,
+                modifier = modifier,
+                onImportTranscriptFiles = {
+                    transcriptFilePicker.launch(arrayOf("text/plain", "audio/*", "application/octet-stream"))
+                },
+            )
         }
     }
+    SharedTranscriptImportDialog(sharedTranscriptViewModel)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -179,6 +214,7 @@ private fun SettingsSummaryScreen(
     viewModel: CustomerManagementViewModel,
     lists: List<CustomerListSummary>,
     modifier: Modifier,
+    onImportTranscriptFiles: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text("설정", fontWeight = FontWeight.Bold) }) }) { padding ->
@@ -195,7 +231,7 @@ private fun SettingsSummaryScreen(
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.9.2")
+                        Text("소희야 가자 Android 0.9.3")
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }
@@ -222,6 +258,14 @@ private fun SettingsSummaryScreen(
                     Icon(Icons.AutoMirrored.Filled.Message, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
                     Text("문자기록 가져오기")
+                }
+            }
+            item {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = onImportTranscriptFiles, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("통화 녹음·전사 파일 가져오기")
                 }
             }
             item {

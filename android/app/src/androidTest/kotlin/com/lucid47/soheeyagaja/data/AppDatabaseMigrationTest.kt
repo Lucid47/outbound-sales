@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
     @Test
-    fun migrationOneToSixPreservesDataAndAddsMapAndMediaSchema() {
+    fun migrationOneToSevenPreservesDataAndAddsMapAndMediaSchema() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TEST_DATABASE)
         val legacy = FrameworkSQLiteOpenHelperFactory().create(
@@ -41,6 +41,7 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
         migrated.openHelper.writableDatabase
@@ -90,6 +91,14 @@ class AppDatabaseMigrationTest {
             )
             tableCursor.use { assertTrue("$table 테이블이 필요합니다.", it.moveToFirst()) }
         }
+        val audioColumns = migrated.openHelper.readableDatabase.query("PRAGMA table_info(audio_memos)")
+        val audioColumnNames = buildSet {
+            audioColumns.use {
+                val nameIndex = it.getColumnIndexOrThrow("name")
+                while (it.moveToNext()) add(it.getString(nameIndex))
+            }
+        }
+        assertTrue("sourceType" in audioColumnNames)
         val statuses = migrated.openHelper.readableDatabase.query("SELECT COUNT(*) FROM dashboard_statuses")
         statuses.use {
             assertTrue(it.moveToFirst())

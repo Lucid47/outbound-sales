@@ -39,6 +39,9 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE listId = :listId ORDER BY sourceRow")
     suspend fun getByList(listId: Long): List<CustomerEntity>
 
+    @Query("SELECT * FROM customers ORDER BY name COLLATE NOCASE, sourceRow")
+    suspend fun getAll(): List<CustomerEntity>
+
     @Query("SELECT COALESCE(MAX(sourceRow), 0) FROM customers WHERE listId = :listId")
     suspend fun maxSourceRow(listId: Long): Long
 
@@ -98,6 +101,9 @@ interface CustomerListDao {
 
     @Query("SELECT * FROM customer_lists WHERE id = :listId")
     suspend fun getById(listId: Long): CustomerListEntity?
+
+    @Query("SELECT * FROM customer_lists ORDER BY updatedAtEpochMillis DESC")
+    suspend fun getAll(): List<CustomerListEntity>
 
     @Query("SELECT EXISTS(SELECT 1 FROM customer_lists WHERE id = :listId)")
     suspend fun exists(listId: Long): Boolean

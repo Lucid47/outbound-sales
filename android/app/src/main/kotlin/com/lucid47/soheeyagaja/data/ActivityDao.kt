@@ -29,6 +29,28 @@ interface ActivityDao {
         messageBody: String,
     ): Boolean
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM contact_logs WHERE customerId = :customerId " +
+            "AND type = :type AND COALESCE(messageBody, '') = :messageBody)",
+    )
+    suspend fun hasImportedText(
+        customerId: Long,
+        type: String,
+        messageBody: String,
+    ): Boolean
+
+    @Query(
+        "SELECT customerId FROM contact_logs WHERE type IN " +
+            "('CALL_INCOMING', 'CALL_OUTGOING', 'CALL_MISSED', 'CALL_REJECTED', 'CALL_OTHER') " +
+            "AND createdAtEpochMillis BETWEEN :fromEpochMillis AND :toEpochMillis " +
+            "ORDER BY ABS(createdAtEpochMillis - :targetEpochMillis) LIMIT 1",
+    )
+    suspend fun nearestImportedCallCustomer(
+        targetEpochMillis: Long,
+        fromEpochMillis: Long,
+        toEpochMillis: Long,
+    ): Long?
+
     @Insert
     suspend fun insertVisitLog(log: VisitLogEntity): Long
 
@@ -159,8 +181,8 @@ interface ActivityDao {
                audio_memos.listId AS listId,
                audio_memos.customerId AS customerId,
                customers.name AS customerName,
-               'VISIT' AS category,
-               'AUDIO_MEMO' AS type,
+               CASE WHEN audio_memos.sourceType = 'CALL_TRANSCRIPT' THEN 'CONTACT' ELSE 'VISIT' END AS category,
+               audio_memos.sourceType AS type,
                'SAVED' AS result,
                audio_memos.transcript AS detail,
                audio_memos.createdAtEpochMillis AS occurredAtEpochMillis,
@@ -251,8 +273,8 @@ interface ActivityDao {
                audio_memos.listId AS listId,
                audio_memos.customerId AS customerId,
                customers.name AS customerName,
-               'VISIT' AS category,
-               'AUDIO_MEMO' AS type,
+               CASE WHEN audio_memos.sourceType = 'CALL_TRANSCRIPT' THEN 'CONTACT' ELSE 'VISIT' END AS category,
+               audio_memos.sourceType AS type,
                'SAVED' AS result,
                audio_memos.transcript AS detail,
                audio_memos.createdAtEpochMillis AS occurredAtEpochMillis,

@@ -32,36 +32,34 @@ class RecordedAudioTranscriber(private val context: Context) {
         onProgress("음성을 글로 변환하는 중...")
         LibVosk.setLogLevel(LogLevel.WARNINGS)
 
-        val format = readAudioFormat(file)
-        check(format.channelCount == 1) { "현재는 한 채널 음성만 전사할 수 있습니다." }
         Model(modelDirectory.absolutePath).use { model ->
-            Recognizer(model, format.sampleRate.toFloat()).use { recognizer ->
-                decodePcm16(file) { bytes -> recognizer.acceptWaveForm(bytes, bytes.size) }
-                val text = JSONObject(recognizer.finalResult).optString("text").trim()
+            var recognizer: Recognizer? = null
+            val completedSegments = mutableListOf<String>()
+            try {
+                decodePcm16(file) { bytes, sampleRate, channelCount ->
+                    val activeRecognizer = recognizer ?: Recognizer(model, sampleRate.toFloat()).also {
+                        recognizer = it
+                    }
+                    val mono = downmixPcm16(bytes, channelCount)
+                    if (mono.isNotEmpty() && activeRecognizer.acceptWaveForm(mono, mono.size)) {
+                        extractVoskText(activeRecognizer.result)?.let(completedSegments::add)
+                    }
+                }
+                val activeRecognizer = checkNotNull(recognizer) { "음성 데이터가 비어 있습니다." }
+                extractVoskText(activeRecognizer.finalResult)?.let(completedSegments::add)
+                val text = completedSegments.joinToString(" ").replace(Regex("\\s+"), " ").trim()
                 check(text.isNotEmpty()) { "음성에서 인식 가능한 한국어 문장을 찾지 못했습니다." }
                 text
+            } finally {
+                recognizer?.close()
             }
         }
     }
 
-    private fun readAudioFormat(file: File): PcmFormat {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(file.absolutePath)
-            val format = (0 until extractor.trackCount)
-                .map(extractor::getTrackFormat)
-                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
-                ?: error("음성 트랙을 찾지 못했습니다.")
-            PcmFormat(
-                sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE),
-                channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT),
-            )
-        } finally {
-            extractor.release()
-        }
-    }
-
-    private suspend fun decodePcm16(file: File, consume: (ByteArray) -> Unit) {
+    private suspend fun decodePcm16(
+        file: File,
+        consume: (bytes: ByteArray, sampleRate: Int, channelCount: Int) -> Unit,
+    ) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
@@ -71,6 +69,8 @@ class RecordedAudioTranscriber(private val context: Context) {
             } ?: error("음성 트랙을 찾지 못했습니다.")
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = requireNotNull(inputFormat.getString(MediaFormat.KEY_MIME))
+            var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var channelCount = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             extractor.selectTrack(trackIndex)
             codec = MediaCodec.createDecoderByType(mime).apply {
                 configure(inputFormat, null, null, 0)
@@ -99,13 +99,16 @@ class RecordedAudioTranscriber(private val context: Context) {
 
                 when (val outputIndex = codec.dequeueOutputBuffer(bufferInfo, CODEC_TIMEOUT_US)) {
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val encoding = codec.outputFormat.getIntegerOrDefault(
+                        val outputFormat = codec.outputFormat
+                        val encoding = outputFormat.getIntegerOrDefault(
                             MediaFormat.KEY_PCM_ENCODING,
                             AudioFormat.ENCODING_PCM_16BIT,
                         )
                         check(encoding == AudioFormat.ENCODING_PCM_16BIT) {
                             "이 기기의 음성 디코더가 지원하지 않는 PCM 형식을 반환했습니다."
                         }
+                        sampleRate = outputFormat.getIntegerOrDefault(MediaFormat.KEY_SAMPLE_RATE, sampleRate)
+                        channelCount = outputFormat.getIntegerOrDefault(MediaFormat.KEY_CHANNEL_COUNT, channelCount)
                     }
                     else -> if (outputIndex >= 0) {
                         if (bufferInfo.size > 0) {
@@ -114,7 +117,7 @@ class RecordedAudioTranscriber(private val context: Context) {
                             buffer.limit(bufferInfo.offset + bufferInfo.size)
                             val bytes = ByteArray(bufferInfo.size)
                             buffer.get(bytes)
-                            consume(bytes)
+                            consume(bytes, sampleRate, channelCount)
                         }
                         outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         codec.releaseOutputBuffer(outputIndex, false)
@@ -131,11 +134,35 @@ class RecordedAudioTranscriber(private val context: Context) {
     private fun MediaFormat.getIntegerOrDefault(key: String, fallback: Int): Int =
         if (containsKey(key)) getInteger(key) else fallback
 
-    private data class PcmFormat(val sampleRate: Int, val channelCount: Int)
-
     private companion object {
         const val CODEC_TIMEOUT_US = 10_000L
     }
+}
+
+internal fun extractVoskText(json: String): String? =
+    runCatching { JSONObject(json).optString("text").replace(Regex("\\s+"), " ").trim() }
+        .getOrNull()
+        ?.takeIf(String::isNotBlank)
+
+internal fun downmixPcm16(bytes: ByteArray, channelCount: Int): ByteArray {
+    require(channelCount > 0) { "음성 채널 수가 올바르지 않습니다." }
+    if (channelCount == 1) return bytes
+    val bytesPerFrame = channelCount * 2
+    val frameCount = bytes.size / bytesPerFrame
+    if (frameCount == 0) return byteArrayOf()
+    val output = ByteArray(frameCount * 2)
+    for (frame in 0 until frameCount) {
+        var sum = 0
+        for (channel in 0 until channelCount) {
+            val offset = frame * bytesPerFrame + channel * 2
+            val sample = ((bytes[offset + 1].toInt() shl 8) or (bytes[offset].toInt() and 0xff)).toShort().toInt()
+            sum += sample
+        }
+        val mixed = (sum / channelCount).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+        output[frame * 2] = (mixed and 0xff).toByte()
+        output[frame * 2 + 1] = ((mixed ushr 8) and 0xff).toByte()
+    }
+    return output
 }
 
 private object KoreanSpeechModel {

@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PhotoMemoEntity::class,
         AudioMemoEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,7 +40,14 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "soheeya-gaja.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            ).addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
                 .build()
                 .also { instance = it }
         }
@@ -311,6 +318,14 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_audio_memos_createdAtEpochMillis " +
                         "ON audio_memos (createdAtEpochMillis)",
+                )
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE audio_memos ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'AUDIO_MEMO'",
                 )
             }
         }

@@ -75,7 +75,7 @@ class BackupArchiveService(
         val customerFilter = "customerId IN (SELECT id FROM customers WHERE listId IN ($ids))"
         val manifest = JSONObject()
             .put("format", FORMAT)
-            .put("schemaVersion", 6)
+            .put("schemaVersion", 7)
             .put("createdAtEpochMillis", System.currentTimeMillis())
             .put("appVersion", "0.7.0")
             .put("customer_lists", queryRows(db, "SELECT * FROM customer_lists WHERE id IN ($ids)"))

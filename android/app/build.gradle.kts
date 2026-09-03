@@ -30,8 +30,8 @@ android {
         applicationId = "com.lucid47.soheeyagaja"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.9.2"
+        versionCode = 13
+        versionName = "0.9.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = googleMapsApiKey
@@ -85,6 +85,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.4")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")

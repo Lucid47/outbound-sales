@@ -25,6 +25,9 @@ interface AttachmentDao {
     @Query("SELECT * FROM audio_memos")
     suspend fun getAllAudio(): List<AudioMemoEntity>
 
+    @Query("SELECT * FROM audio_memos WHERE id = :id")
+    suspend fun getAudioById(id: Long): AudioMemoEntity?
+
     @Query("DELETE FROM photo_memos WHERE id = :id")
     suspend fun deletePhoto(id: Long)
 
@@ -33,6 +36,16 @@ interface AttachmentDao {
 
     @Query("UPDATE audio_memos SET transcript = :transcript WHERE id = :id")
     suspend fun updateAudioTranscript(id: Long, transcript: String)
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM audio_memos WHERE customerId = :customerId " +
+            "AND sourceType = :sourceType AND createdAtEpochMillis = :occurredAt)",
+    )
+    suspend fun hasImportedAudio(
+        customerId: Long,
+        sourceType: String,
+        occurredAt: Long,
+    ): Boolean
 
     @Query("SELECT COUNT(*) FROM photo_memos WHERE customerId = :customerId")
     suspend fun countPhotos(customerId: Long): Long

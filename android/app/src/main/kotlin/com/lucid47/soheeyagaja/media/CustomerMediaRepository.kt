@@ -3,6 +3,7 @@ package com.lucid47.soheeyagaja.media
 import android.content.Context
 import android.net.Uri
 import androidx.room.withTransaction
+import com.lucid47.soheeyagaja.activities.ActivityRepository
 import com.lucid47.soheeyagaja.data.AppDatabase
 import com.lucid47.soheeyagaja.data.AudioMemoEntity
 import com.lucid47.soheeyagaja.data.PhotoMemoEntity
@@ -61,9 +62,55 @@ class CustomerMediaRepository(
         transcript: String,
     ): Long = withContext(Dispatchers.IO) {
         require(file.exists() && file.length() > 0L) { "녹음 파일을 찾지 못했습니다." }
+        saveAudioMetadata(
+            customerId = customerId,
+            file = file,
+            durationMillis = durationMillis,
+            transcript = transcript,
+            sourceType = "AUDIO_MEMO",
+            occurredAtEpochMillis = System.currentTimeMillis(),
+        )
+    }
+
+    suspend fun importCallRecording(
+        customerId: Long,
+        source: File,
+        durationMillis: Long,
+        transcript: String,
+        occurredAtEpochMillis: Long,
+    ): Long = withContext(Dispatchers.IO) {
+        require(source.exists() && source.length() > 0L) { "공유된 통화 녹음 파일을 찾지 못했습니다." }
+        val extension = source.extension.lowercase().takeIf { it.matches(Regex("[a-z0-9]{1,5}")) } ?: "m4a"
+        val destination = File(
+            File(context.filesDir, "media/audio/$customerId").apply { mkdirs() },
+            "call-${occurredAtEpochMillis}-${UUID.randomUUID()}.$extension",
+        )
+        source.copyTo(destination, overwrite = true)
+        try {
+            saveAudioMetadata(
+                customerId = customerId,
+                file = destination,
+                durationMillis = durationMillis,
+                transcript = transcript,
+                sourceType = ActivityRepository.TYPE_CALL_TRANSCRIPT,
+                occurredAtEpochMillis = occurredAtEpochMillis,
+            )
+        } catch (error: Throwable) {
+            destination.delete()
+            throw error
+        }
+    }
+
+    private suspend fun saveAudioMetadata(
+        customerId: Long,
+        file: File,
+        durationMillis: Long,
+        transcript: String,
+        sourceType: String,
+        occurredAtEpochMillis: Long,
+    ): Long =
         database.withTransaction {
             val customer = requireNotNull(database.customerDao().getById(customerId)) { "고객을 찾지 못했습니다." }
-            val now = System.currentTimeMillis()
             val id = database.attachmentDao().insertAudio(
                 AudioMemoEntity(
                     listId = customer.listId,
@@ -71,13 +118,13 @@ class CustomerMediaRepository(
                     filePath = file.absolutePath,
                     durationMillis = durationMillis.coerceAtLeast(0L),
                     transcript = transcript.trim(),
-                    createdAtEpochMillis = now,
+                    sourceType = sourceType,
+                    createdAtEpochMillis = occurredAtEpochMillis,
                 ),
             )
-            database.customerListDao().touch(customer.listId, now)
+            database.customerListDao().touch(customer.listId, System.currentTimeMillis())
             id
         }
-    }
 
     suspend fun deletePhoto(photo: PhotoMemoEntity) = withContext(Dispatchers.IO) {
         database.attachmentDao().deletePhoto(photo.id)

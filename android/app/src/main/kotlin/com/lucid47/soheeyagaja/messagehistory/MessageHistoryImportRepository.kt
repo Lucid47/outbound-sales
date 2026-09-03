@@ -1,6 +1,7 @@
 package com.lucid47.soheeyagaja.messagehistory
 
 import android.content.Context
+import android.net.Uri
 import android.provider.Telephony
 import androidx.room.withTransaction
 import com.lucid47.soheeyagaja.activities.ActivityRepository
@@ -25,7 +26,7 @@ data class MessageHistoryImportResult(
 }
 
 private data class MessageRecord(
-    val phoneNumber: String,
+    val phoneNumbers: List<String>,
     val body: String,
     val occurredAtEpochMillis: Long,
     val type: String,
@@ -67,15 +68,120 @@ class MessageHistoryImportRepository(
                         else -> continue
                     }
                     records += MessageRecord(
-                        phoneNumber = cursor.getString(addressIndex).orEmpty(),
+                        phoneNumbers = listOf(cursor.getString(addressIndex).orEmpty()),
                         body = cursor.getString(bodyIndex).orEmpty().trim(),
                         occurredAtEpochMillis = cursor.getLong(dateIndex),
                         type = messageType,
                     )
                 }
             }
+            records += readMmsRecords(since)
             importRecords(listId, records)
         }
+
+    private fun readMmsRecords(sinceEpochMillis: Long?): List<MessageRecord> {
+        val selectionParts = mutableListOf("msg_box IN (?, ?)")
+        val selectionArgs = mutableListOf(MMS_BOX_INBOX.toString(), MMS_BOX_SENT.toString())
+        sinceEpochMillis?.let {
+            selectionParts += "date >= ?"
+            selectionArgs += (it / 1_000L).toString()
+        }
+        val records = mutableListOf<MessageRecord>()
+        context.contentResolver.query(
+            Telephony.Mms.CONTENT_URI,
+            arrayOf("_id", "date", "msg_box", "sub"),
+            selectionParts.joinToString(" AND "),
+            selectionArgs.toTypedArray(),
+            "date DESC",
+        )?.use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow("_id")
+            val dateIndex = cursor.getColumnIndexOrThrow("date")
+            val boxIndex = cursor.getColumnIndexOrThrow("msg_box")
+            val subjectIndex = cursor.getColumnIndex("sub")
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idIndex)
+                val box = cursor.getInt(boxIndex)
+                val addressType = if (box == MMS_BOX_INBOX) MMS_ADDRESS_FROM else MMS_ADDRESS_TO
+                val addresses = readMmsAddresses(id, addressType)
+                val parts = readMmsParts(id)
+                val subject = if (subjectIndex >= 0) cursor.getString(subjectIndex).orEmpty().trim() else ""
+                val bodyParts = buildList {
+                    if (subject.isNotBlank()) add("제목: $subject")
+                    if (parts.text.isNotBlank()) add(parts.text)
+                    if (parts.attachmentCount > 0) add("[MMS 첨부 ${parts.attachmentCount}개]")
+                }
+                records += MessageRecord(
+                    phoneNumbers = addresses,
+                    body = bodyParts.joinToString("\n"),
+                    occurredAtEpochMillis = cursor.getLong(dateIndex) * 1_000L,
+                    type = if (box == MMS_BOX_INBOX) {
+                        ActivityRepository.TYPE_MMS_INCOMING
+                    } else {
+                        ActivityRepository.TYPE_MMS_OUTGOING
+                    },
+                )
+            }
+        }
+        return records
+    }
+
+    private fun readMmsAddresses(messageId: Long, requiredType: Int): List<String> {
+        val result = mutableListOf<String>()
+        context.contentResolver.query(
+            Uri.parse("content://mms/$messageId/addr"),
+            arrayOf("address", "type"),
+            "type = ?",
+            arrayOf(requiredType.toString()),
+            null,
+        )?.use { cursor ->
+            val addressIndex = cursor.getColumnIndexOrThrow("address")
+            while (cursor.moveToNext()) {
+                cursor.getString(addressIndex)?.trim()
+                    ?.takeUnless { it.isBlank() || it == "insert-address-token" }
+                    ?.let(result::add)
+            }
+        }
+        return result.distinct()
+    }
+
+    private fun readMmsParts(messageId: Long): MmsParts {
+        val textParts = mutableListOf<String>()
+        var attachmentCount = 0
+        context.contentResolver.query(
+            Uri.parse("content://mms/part"),
+            arrayOf("_id", "ct", "text", "_data"),
+            "mid = ?",
+            arrayOf(messageId.toString()),
+            null,
+        )?.use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow("_id")
+            val typeIndex = cursor.getColumnIndexOrThrow("ct")
+            val textIndex = cursor.getColumnIndexOrThrow("text")
+            val dataIndex = cursor.getColumnIndexOrThrow("_data")
+            while (cursor.moveToNext()) {
+                val contentType = cursor.getString(typeIndex).orEmpty().lowercase()
+                when (contentType) {
+                    "text/plain" -> {
+                        val inline = cursor.getString(textIndex).orEmpty()
+                        val text = if (inline.isNotBlank()) inline else {
+                            val partId = cursor.getLong(idIndex)
+                            runCatching {
+                                context.contentResolver.openInputStream(Uri.parse("content://mms/part/$partId"))
+                                    ?.bufferedReader(Charsets.UTF_8)
+                                    ?.use { it.readText() }
+                            }.getOrNull().orEmpty()
+                        }
+                        text.trim().takeIf(String::isNotBlank)?.let(textParts::add)
+                    }
+                    "application/smil" -> Unit
+                    else -> if (cursor.getString(dataIndex) != null || contentType.isNotBlank()) {
+                        attachmentCount += 1
+                    }
+                }
+            }
+        }
+        return MmsParts(textParts.distinct().joinToString("\n"), attachmentCount)
+    }
 
     private suspend fun importRecords(
         listId: Long,
@@ -91,12 +197,13 @@ class MessageHistoryImportRepository(
         var invalid = 0
 
         records.forEach { record ->
-            val phone = ImportedCustomer.normalizePhone(record.phoneNumber)
-            if (phone.isBlank() || record.body.isBlank() || record.occurredAtEpochMillis <= 0L) {
+            val phones = record.phoneNumbers.map(ImportedCustomer::normalizePhone).filter(String::isNotBlank).distinct()
+            if (phones.isEmpty() || record.body.isBlank() || record.occurredAtEpochMillis <= 0L) {
                 invalid += 1
                 return@forEach
             }
-            val customer = uniqueCustomersByPhone[phone]
+            val matchedCustomers = phones.mapNotNull(uniqueCustomersByPhone::get).distinctBy { it.id }
+            val customer = matchedCustomers.singleOrNull()
             if (customer == null) {
                 unmatched += 1
                 return@forEach
@@ -130,5 +237,11 @@ class MessageHistoryImportRepository(
 
     private companion object {
         const val MILLIS_PER_DAY = 24L * 60L * 60L * 1_000L
+        const val MMS_BOX_INBOX = 1
+        const val MMS_BOX_SENT = 2
+        const val MMS_ADDRESS_FROM = 137
+        const val MMS_ADDRESS_TO = 151
     }
 }
+
+private data class MmsParts(val text: String, val attachmentCount: Int)

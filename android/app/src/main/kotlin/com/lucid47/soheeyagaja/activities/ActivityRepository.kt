@@ -163,6 +163,9 @@ class ActivityRepository(private val database: AppDatabase) {
         const val TYPE_CALL_OTHER = "CALL_OTHER"
         const val TYPE_SMS_INCOMING = "SMS_INCOMING"
         const val TYPE_SMS_OUTGOING = "SMS_OUTGOING"
+        const val TYPE_MMS_INCOMING = "MMS_INCOMING"
+        const val TYPE_MMS_OUTGOING = "MMS_OUTGOING"
+        const val TYPE_CALL_TRANSCRIPT = "CALL_TRANSCRIPT"
 
         const val RESULT_OPENED = "OPENED"
         const val RESULT_COMPLETED = "COMPLETED"
