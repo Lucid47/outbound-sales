@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -343,8 +344,67 @@ fun AudioMemoDialog(
     val transcriptionProgress by viewModel.audioTranscriptionProgress.collectAsStateWithLifecycle()
     val recording by VoiceRecordingService.state.collectAsStateWithLifecycle()
     var transcript by remember { mutableStateOf("") }
+    var showModelDownloadNotice by remember { mutableStateOf(false) }
+    val saveRecording: (Boolean) -> Unit = { autoTranscribe ->
+        recording.filePath?.let(::File)?.let { file ->
+            viewModel.saveAudioMemo(
+                customerId = customerId,
+                file = file,
+                durationMillis = recording.durationMillis,
+                transcript = transcript,
+                autoTranscribe = autoTranscribe,
+            )
+            transcript = ""
+            VoiceRecordingService.resetFinished()
+        }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        saveRecording(true)
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) VoiceRecordingService.start(context, viewModel.createAudioFile(customerId).absolutePath)
+    }
+
+    if (showModelDownloadNotice) {
+        AlertDialog(
+            onDismissRequest = { showModelDownloadNotice = false },
+            title = { Text("한국어 전사 모델 다운로드") },
+            text = {
+                Text(
+                    "최초 1회 약 82MB를 내려받습니다. 모바일 데이터가 사용될 수 있습니다. " +
+                        "화면을 닫거나 다른 앱으로 이동해도 백그라운드에서 계속되며, " +
+                        "완료 후 음성은 외부 서버로 보내지 않고 기기 안에서 전사합니다.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showModelDownloadNotice = false
+                        if (
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS,
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            saveRecording(true)
+                        }
+                    },
+                ) { Text("다운로드 후 전사") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showModelDownloadNotice = false
+                        saveRecording(false)
+                    },
+                ) { Text("전사 없이 저장") }
+            },
+        )
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -387,7 +447,10 @@ fun AudioMemoDialog(
                             onValueChange = { transcript = it },
                             label = { Text("메모 (선택)") },
                             supportingText = {
-                                Text("비워두면 저장 후 기기 내에서 자동 전사합니다. 최초 1회 한국어 모델 약 82MB를 내려받습니다.")
+                                Text(
+                                    "비워두면 저장 후 기기 내에서 자동 전사합니다. 최초 1회 약 82MB를 받으며 " +
+                                        "화면을 전환해도 다운로드를 계속합니다.",
+                                )
                             },
                             minLines = 3,
                             modifier = Modifier.fillMaxWidth(),
@@ -396,10 +459,11 @@ fun AudioMemoDialog(
                     item {
                         Button(
                             onClick = {
-                                val file = recording.filePath?.let(::File) ?: return@Button
-                                viewModel.saveAudioMemo(customerId, file, recording.durationMillis, transcript)
-                                transcript = ""
-                                VoiceRecordingService.resetFinished()
+                                if (transcript.isBlank() && !viewModel.isSpeechModelReady()) {
+                                    showModelDownloadNotice = true
+                                } else {
+                                    saveRecording(true)
+                                }
                             },
                             modifier = Modifier.fillMaxWidth().height(54.dp),
                         ) {

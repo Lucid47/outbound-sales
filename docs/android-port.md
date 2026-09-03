@@ -151,7 +151,7 @@ Google 지도는 `android/local.properties`의 `GOOGLE_MAPS_API_KEY` 또는 빌�
 `GOOGLE_MAPS_API_KEY`에서 키를 읽는다. 실제 키는 Git에 커밋하지 않는다. Google Cloud에서
 `Maps SDK for Android`를 활성화하고 API 키를 패키지명 `com.lucid47.soheeyagaja`와 앱 서명
 SHA-1로 제한해야 한다. 키가 없으면 빈 지도 대신 설정 필요 안내를 표시한다.
-현재 Android 앱 버전은 `0.9.3 (build 13)`이다.
+현재 Android 앱 버전은 `0.9.4 (build 14)`이다.
 
 Samsung 전화·음성 녹음 앱의 비공개 저장소를 직접 탐색하지 않는다. 삼성 앱에서 텍스트 또는 `음성과 텍스트 파일`을 공유하고 대상 앱으로 소희야가자를 선택하면, 파일명·전화번호·통화시각으로 고객을 추천한 뒤 사용자 확인을 거쳐 고객 히스토리에 보존한다. 텍스트 없이 음성만 공유된 경우에는 저장 후 Vosk 한국어 모델로 오프라인 전사를 시도한다.
 

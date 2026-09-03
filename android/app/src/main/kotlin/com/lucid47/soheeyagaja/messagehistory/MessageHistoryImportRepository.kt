@@ -12,13 +12,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 data class MessageHistoryImportResult(
+    val scannedCount: Int,
     val importedCount: Int,
     val duplicateCount: Int,
     val unmatchedCount: Int,
     val invalidCount: Int,
 ) {
     fun summary(): String = buildString {
-        append("문자기록 ${importedCount}건을 고객 히스토리에 추가했습니다.")
+        if (scannedCount == 0) {
+            append("가져올 수 있는 SMS/MMS 기록을 찾지 못했습니다. 채팅+ RCS 대화는 포함되지 않습니다.")
+            return@buildString
+        }
+        append("SMS/MMS ${scannedCount}건을 읽어 ${importedCount}건을 고객 히스토리에 추가했습니다.")
         if (duplicateCount > 0) append(" 중복 ${duplicateCount}건 제외.")
         if (unmatchedCount > 0) append(" 고객 미매칭 ${unmatchedCount}건.")
         if (invalidCount > 0) append(" 형식 오류 ${invalidCount}건.")
@@ -232,7 +237,7 @@ class MessageHistoryImportRepository(
             imported += 1
         }
         if (imported > 0) database.customerListDao().touch(listId, System.currentTimeMillis())
-        MessageHistoryImportResult(imported, duplicate, unmatched, invalid)
+        MessageHistoryImportResult(records.size, imported, duplicate, unmatched, invalid)
     }
 
     private companion object {

@@ -5,18 +5,10 @@ import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.atomic.AtomicReference
-import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.vosk.LibVosk
@@ -25,6 +17,8 @@ import org.vosk.Model
 import org.vosk.Recognizer
 
 class RecordedAudioTranscriber(private val context: Context) {
+    fun isModelReady(): Boolean = KoreanSpeechModel.isReady(context)
+
     suspend fun transcribe(file: File, onProgress: (String) -> Unit = {}): String = withContext(Dispatchers.IO) {
         require(file.exists() && file.length() > 0L) { "전사할 음성 파일을 찾지 못했습니다." }
         onProgress("한국어 전사 모델을 확인하는 중...")
@@ -163,112 +157,4 @@ internal fun downmixPcm16(bytes: ByteArray, channelCount: Int): ByteArray {
         output[frame * 2 + 1] = ((mixed ushr 8) and 0xff).toByte()
     }
     return output
-}
-
-private object KoreanSpeechModel {
-    private const val MODEL_NAME = "vosk-model-small-ko-0.22"
-    private const val MODEL_URL = "https://alphacephei.com/vosk/models/$MODEL_NAME.zip"
-    private val cached = AtomicReference<File?>()
-    private val mutex = Mutex()
-
-    suspend fun ensureReady(context: Context, onProgress: (String) -> Unit): File =
-        withContext(Dispatchers.IO) {
-            mutex.withLock { ensureReadyLocked(context, onProgress) }
-        }
-
-    private fun ensureReadyLocked(context: Context, onProgress: (String) -> Unit): File {
-        cached.get()?.takeIf(::isValidModel)?.let { return it }
-        val root = File(context.filesDir, "speech-models")
-        val finalDirectory = File(root, MODEL_NAME)
-        if (isValidModel(finalDirectory)) {
-            cached.set(finalDirectory)
-            return finalDirectory
-        }
-
-        root.mkdirs()
-        val archive = File(root, "$MODEL_NAME.download")
-        val stage = File(root, "$MODEL_NAME-staging")
-        archive.delete()
-        stage.deleteRecursively()
-        stage.mkdirs()
-        try {
-            download(archive, onProgress)
-            onProgress("한국어 전사 모델을 설치하는 중...")
-            unzip(archive, stage)
-            val extracted = stage.walkTopDown().firstOrNull(::isValidModel)
-                ?: error("다운로드한 한국어 전사 모델의 형식이 올바르지 않습니다.")
-            finalDirectory.deleteRecursively()
-            if (!extracted.renameTo(finalDirectory)) {
-                extracted.copyRecursively(finalDirectory, overwrite = true)
-            }
-            check(isValidModel(finalDirectory)) { "한국어 전사 모델 설치를 완료하지 못했습니다." }
-            cached.set(finalDirectory)
-            return finalDirectory
-        } finally {
-            archive.delete()
-            stage.deleteRecursively()
-        }
-    }
-
-    private fun download(destination: File, onProgress: (String) -> Unit) {
-        val connection = URL(MODEL_URL).openConnection() as HttpURLConnection
-        connection.connectTimeout = 20_000
-        connection.readTimeout = 60_000
-        connection.instanceFollowRedirects = true
-        connection.setRequestProperty("User-Agent", "SoheeyaGaja-Android")
-        try {
-            check(connection.responseCode in 200..299) {
-                "한국어 전사 모델을 내려받지 못했습니다. (HTTP ${connection.responseCode})"
-            }
-            val total = connection.contentLengthLong
-            BufferedInputStream(connection.inputStream).use { input ->
-                FileOutputStream(destination).buffered().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var copied = 0L
-                    var lastPercent = -1
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        copied += count
-                        if (total > 0) {
-                            val percent = ((copied * 100) / total).toInt().coerceIn(0, 100)
-                            if (percent >= lastPercent + 5) {
-                                lastPercent = percent
-                                onProgress("한국어 전사 모델 내려받는 중 $percent%")
-                            }
-                        } else {
-                            onProgress("한국어 전사 모델 내려받는 중...")
-                        }
-                    }
-                }
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun unzip(archive: File, target: File) {
-        val targetPath = target.canonicalPath + File.separator
-        ZipInputStream(archive.inputStream().buffered()).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                val output = File(target, entry.name)
-                require(output.canonicalPath.startsWith(targetPath)) { "안전하지 않은 모델 압축 파일입니다." }
-                if (entry.isDirectory) {
-                    output.mkdirs()
-                } else {
-                    output.parentFile?.mkdirs()
-                    output.outputStream().buffered().use(zip::copyTo)
-                }
-                zip.closeEntry()
-            }
-        }
-    }
-
-    private fun isValidModel(directory: File): Boolean =
-        directory.isDirectory &&
-            File(directory, "am/final.mdl").isFile &&
-            File(directory, "conf/model.conf").isFile &&
-            File(directory, "graph/HCLr.fst").isFile
 }

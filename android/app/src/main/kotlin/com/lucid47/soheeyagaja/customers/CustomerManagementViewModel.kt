@@ -730,7 +730,9 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
             showError(IllegalStateException("문자기록을 연결할 고객리스트를 먼저 선택해주세요."))
             return
         }
-        _uiState.update { it.copy(messageHistoryToolsVisible = true) }
+        _uiState.update {
+            it.copy(messageHistoryToolsVisible = true, statusMessage = null, errorMessage = null)
+        }
     }
 
     fun closeMessageHistoryTools() {
@@ -740,7 +742,9 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
 
     fun importDeviceMessageHistory(days: Int?) {
         val listId = _uiState.value.selectedListId ?: return
-        _uiState.update { it.copy(messageHistoryBusy = true, errorMessage = null) }
+        _uiState.update {
+            it.copy(messageHistoryBusy = true, statusMessage = null, errorMessage = null)
+        }
         viewModelScope.launch {
             runCatching { messageHistoryRepository.importDeviceMessages(listId, days) }
                 .onSuccess { result ->
@@ -940,17 +944,29 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
 
     fun createAudioFile(customerId: Long): File = mediaRepository.newAudioFile(customerId)
 
-    fun saveAudioMemo(customerId: Long, file: File, durationMillis: Long, transcript: String) {
+    fun isSpeechModelReady(): Boolean = audioTranscriber.isModelReady()
+
+    fun saveAudioMemo(
+        customerId: Long,
+        file: File,
+        durationMillis: Long,
+        transcript: String,
+        autoTranscribe: Boolean = true,
+    ) {
         viewModelScope.launch {
             runCatching { mediaRepository.saveAudioMemo(customerId, file, durationMillis, transcript) }
                 .onSuccess { audioId ->
                     _uiState.update {
                         it.copy(
-                            statusMessage = if (transcript.isBlank()) "음성 메모를 저장했습니다. 기기 내 자동 전사를 시작합니다." else "음성 메모를 저장했습니다.",
+                            statusMessage = when {
+                                transcript.isNotBlank() -> "음성 메모를 저장했습니다."
+                                autoTranscribe -> "음성 메모를 저장했습니다. 모델 다운로드와 전사를 백그라운드에서 계속합니다."
+                                else -> "음성 메모를 저장했습니다. 전사는 나중에 다시 시도할 수 있습니다."
+                            },
                             errorMessage = null,
                         )
                     }
-                    if (transcript.isBlank()) transcribeAudio(audioId, file)
+                    if (transcript.isBlank() && autoTranscribe) transcribeAudio(audioId, file)
                 }
                 .onFailure(::showError)
         }

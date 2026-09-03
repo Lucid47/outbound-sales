@@ -186,6 +186,36 @@ fun MessageHistoryToolsDialog(
                         }
                     }
                 }
+                state.statusMessage?.let { message ->
+                    item {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        ) {
+                            Text(
+                                message,
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+                state.errorMessage?.let { message ->
+                    item {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        ) {
+                            Text(
+                                message,
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

@@ -130,7 +130,9 @@ private fun DraftContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        if (draft.transcript.isBlank()) "공유된 텍스트가 없어 저장 후 오프라인 자동 전사를 시작합니다."
+                        if (draft.transcript.isBlank()) {
+                            "공유된 텍스트가 없어 저장 후 오프라인 자동 전사를 시작합니다. 최초 1회 약 82MB 모델을 받으며, 다른 화면으로 이동해도 다운로드를 계속합니다."
+                        }
                         else draft.transcript,
                         maxLines = 7,
                         overflow = TextOverflow.Ellipsis,
