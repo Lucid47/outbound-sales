@@ -43,12 +43,40 @@ data class CustomerEditorState(
     val errorMessage: String? = null,
 )
 
-enum class HistoryKindFilter {
+enum class HistoryActivityFilter {
     ALL,
-    TOUCH,
+    CALL,
+    MESSAGE,
     VISIT,
-    DONE,
+    MEMO,
+    STATUS,
 }
+
+enum class HistoryDisplayMode {
+    EVENTS,
+    CUSTOMERS,
+}
+
+enum class HistorySortOrder {
+    NEWEST,
+    OLDEST,
+    CUSTOMER_NAME,
+}
+
+enum class HistoryDatePreset {
+    ALL,
+    LAST_30_DAYS,
+    LAST_MONTH,
+    LAST_QUARTER,
+    CUSTOM,
+}
+
+data class HistoryCustomerSummary(
+    val customerId: Long,
+    val customerName: String,
+    val entryCount: Int,
+    val latestEntry: HistoryEntryRecord,
+)
 
 enum class MemoMode {
     TEXT_MEMO,
@@ -88,6 +116,65 @@ fun historyTitle(entry: HistoryEntryRecord): String = when (entry.type) {
     else -> "고객 터치"
 }
 
+internal fun historyMatchesActivity(
+    entry: HistoryEntryRecord,
+    filter: HistoryActivityFilter,
+): Boolean = when (filter) {
+    HistoryActivityFilter.ALL -> true
+    HistoryActivityFilter.CALL -> entry.type in CALL_HISTORY_TYPES
+    HistoryActivityFilter.MESSAGE -> entry.type in MESSAGE_HISTORY_TYPES
+    HistoryActivityFilter.VISIT -> entry.type == ActivityRepository.VISIT_QUICK
+    HistoryActivityFilter.MEMO -> entry.type in MEMO_HISTORY_TYPES
+    HistoryActivityFilter.STATUS -> entry.type in STATUS_HISTORY_TYPES
+}
+
+internal fun historyDateRange(preset: HistoryDatePreset, today: LocalDate): LongRange? = when (preset) {
+    HistoryDatePreset.ALL,
+    HistoryDatePreset.CUSTOM,
+    -> null
+    HistoryDatePreset.LAST_30_DAYS -> today.minusDays(29).toEpochDay()..today.toEpochDay()
+    HistoryDatePreset.LAST_MONTH -> {
+        val firstDay = today.withDayOfMonth(1).minusMonths(1)
+        firstDay.toEpochDay()..firstDay.withDayOfMonth(firstDay.lengthOfMonth()).toEpochDay()
+    }
+    HistoryDatePreset.LAST_QUARTER -> {
+        val currentQuarterStartMonth = ((today.monthValue - 1) / 3) * 3 + 1
+        val previousQuarterEnd = LocalDate.of(today.year, currentQuarterStartMonth, 1).minusDays(1)
+        val previousQuarterStartMonth = ((previousQuarterEnd.monthValue - 1) / 3) * 3 + 1
+        val previousQuarterStart = LocalDate.of(previousQuarterEnd.year, previousQuarterStartMonth, 1)
+        previousQuarterStart.toEpochDay()..previousQuarterEnd.toEpochDay()
+    }
+}
+
+private val CALL_HISTORY_TYPES = setOf(
+    ActivityRepository.TYPE_CALL,
+    ActivityRepository.TYPE_CALL_INCOMING,
+    ActivityRepository.TYPE_CALL_OUTGOING,
+    ActivityRepository.TYPE_CALL_MISSED,
+    ActivityRepository.TYPE_CALL_REJECTED,
+    ActivityRepository.TYPE_CALL_BLOCKED,
+    ActivityRepository.TYPE_CALL_OTHER,
+    ActivityRepository.TYPE_CALL_TRANSCRIPT,
+)
+private val MESSAGE_HISTORY_TYPES = setOf(
+    ActivityRepository.TYPE_MANUAL_SMS,
+    ActivityRepository.TYPE_SMS_INCOMING,
+    ActivityRepository.TYPE_SMS_OUTGOING,
+    ActivityRepository.TYPE_MMS_INCOMING,
+    ActivityRepository.TYPE_MMS_OUTGOING,
+)
+private val MEMO_HISTORY_TYPES = setOf(
+    ActivityRepository.TYPE_NOTE,
+    ActivityRepository.VISIT_TEXT_MEMO,
+    "PHOTO_MEMO",
+    "AUDIO_MEMO",
+)
+private val STATUS_HISTORY_TYPES = setOf(
+    ActivityRepository.TYPE_STATUS_COMPLETE,
+    ActivityRepository.TYPE_STATUS_REOPEN,
+    "PROCESS_STATUS",
+)
+
 data class CustomerManagementUiState(
     val selectedListId: Long? = null,
     val searchQuery: String = "",
@@ -101,9 +188,13 @@ data class CustomerManagementUiState(
     val memoEditor: MemoEditorState? = null,
     val historyCustomerId: Long? = null,
     val historySearchQuery: String = "",
-    val historyKindFilter: HistoryKindFilter = HistoryKindFilter.ALL,
+    val historyCustomerFilterId: Long? = null,
+    val historyActivityFilter: HistoryActivityFilter = HistoryActivityFilter.ALL,
+    val historyDisplayMode: HistoryDisplayMode = HistoryDisplayMode.EVENTS,
+    val historySortOrder: HistorySortOrder = HistorySortOrder.NEWEST,
+    val historyDatePreset: HistoryDatePreset = HistoryDatePreset.ALL,
     val historyDateFilterEnabled: Boolean = false,
-    val historyStartEpochDay: Long = LocalDate.now().minusDays(30).toEpochDay(),
+    val historyStartEpochDay: Long = LocalDate.now().minusDays(29).toEpochDay(),
     val historyEndEpochDay: Long = LocalDate.now().toEpochDay(),
     val dashboardVisible: Boolean = false,
     val dashboardSettingsVisible: Boolean = false,
@@ -219,19 +310,13 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         emptyList(),
     )
 
-    val historyEntries = combine(rawHistory, allCustomers, _uiState) { entries, customers, state ->
+    val historyEntries = combine(rawHistory, _uiState) { entries, state ->
         val query = state.historySearchQuery.trim()
         val zone = ZoneId.systemDefault()
-        val completedCustomerIds = customers
-            .filter { it.customer.status == CustomerManagementRepository.STATUS_DONE }
-            .mapTo(mutableSetOf()) { it.customer.id }
         entries.filter { entry ->
-            val matchesType = when (state.historyKindFilter) {
-                HistoryKindFilter.ALL -> true
-                HistoryKindFilter.TOUCH -> entry.category == CATEGORY_CONTACT
-                HistoryKindFilter.VISIT -> entry.category == CATEGORY_VISIT
-                HistoryKindFilter.DONE -> entry.customerId in completedCustomerIds
-            }
+            val matchesType = historyMatchesActivity(entry, state.historyActivityFilter)
+            val matchesCustomer = state.historyCustomerFilterId == null ||
+                entry.customerId == state.historyCustomerFilterId
             val matchesQuery = query.isEmpty() || listOf(
                 entry.customerName,
                 historyTitle(entry),
@@ -243,7 +328,33 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
                 .toEpochDay()
             val matchesDate = !state.historyDateFilterEnabled ||
                 epochDay in state.historyStartEpochDay..state.historyEndEpochDay
-            matchesType && matchesQuery && matchesDate
+            matchesType && matchesCustomer && matchesQuery && matchesDate
+        }.let { filtered ->
+            when (state.historySortOrder) {
+                HistorySortOrder.NEWEST -> filtered.sortedByDescending { it.occurredAtEpochMillis }
+                HistorySortOrder.OLDEST -> filtered.sortedBy { it.occurredAtEpochMillis }
+                HistorySortOrder.CUSTOMER_NAME -> filtered.sortedWith(
+                    compareBy<HistoryEntryRecord> { it.customerName.lowercase() }
+                        .thenByDescending { it.occurredAtEpochMillis },
+                )
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val historyCustomerSummaries = combine(historyEntries, _uiState) { entries, state ->
+        val summaries = entries.groupBy { it.customerId }.map { (customerId, customerEntries) ->
+            val latestEntry = customerEntries.maxBy { it.occurredAtEpochMillis }
+            HistoryCustomerSummary(
+                customerId = customerId,
+                customerName = latestEntry.customerName,
+                entryCount = customerEntries.size,
+                latestEntry = latestEntry,
+            )
+        }
+        when (state.historySortOrder) {
+            HistorySortOrder.NEWEST -> summaries.sortedByDescending { it.latestEntry.occurredAtEpochMillis }
+            HistorySortOrder.OLDEST -> summaries.sortedBy { it.latestEntry.occurredAtEpochMillis }
+            HistorySortOrder.CUSTOMER_NAME -> summaries.sortedBy { it.customerName.lowercase() }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -295,7 +406,15 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     }
 
     fun selectList(listId: Long) {
-        _uiState.update { it.copy(selectedListId = listId, selectedCustomerId = null, searchQuery = "") }
+        _uiState.update {
+            it.copy(
+                selectedListId = listId,
+                selectedCustomerId = null,
+                searchQuery = "",
+                historyCustomerFilterId = null,
+                historyCustomerId = null,
+            )
+        }
     }
 
     fun updateSearch(query: String) {
@@ -571,17 +690,43 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         _uiState.update { it.copy(historySearchQuery = query) }
     }
 
-    fun setHistoryKindFilter(filter: HistoryKindFilter) {
-        _uiState.update { it.copy(historyKindFilter = filter) }
+    fun setHistoryActivityFilter(filter: HistoryActivityFilter) {
+        _uiState.update { it.copy(historyActivityFilter = filter) }
+    }
+
+    fun setHistoryDisplayMode(mode: HistoryDisplayMode) {
+        _uiState.update { it.copy(historyDisplayMode = mode) }
+    }
+
+    fun setHistorySortOrder(order: HistorySortOrder) {
+        _uiState.update { it.copy(historySortOrder = order) }
+    }
+
+    fun setHistoryCustomerFilter(customerId: Long?) {
+        _uiState.update { it.copy(historyCustomerFilterId = customerId) }
+    }
+
+    fun setHistoryDatePreset(preset: HistoryDatePreset) {
+        _uiState.update { state ->
+            val range = historyDateRange(preset, LocalDate.now())
+            state.copy(
+                historyDatePreset = preset,
+                historyDateFilterEnabled = range != null || preset == HistoryDatePreset.CUSTOM,
+                historyStartEpochDay = range?.first ?: state.historyStartEpochDay,
+                historyEndEpochDay = range?.last ?: state.historyEndEpochDay,
+            )
+        }
     }
 
     fun setHistoryDateFilterEnabled(enabled: Boolean) {
-        _uiState.update { it.copy(historyDateFilterEnabled = enabled) }
+        setHistoryDatePreset(if (enabled) HistoryDatePreset.LAST_30_DAYS else HistoryDatePreset.ALL)
     }
 
     fun setHistoryStartEpochDay(epochDay: Long) {
         _uiState.update { state ->
             state.copy(
+                historyDatePreset = HistoryDatePreset.CUSTOM,
+                historyDateFilterEnabled = true,
                 historyStartEpochDay = epochDay.coerceAtMost(state.historyEndEpochDay),
             )
         }
@@ -590,6 +735,8 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     fun setHistoryEndEpochDay(epochDay: Long) {
         _uiState.update { state ->
             state.copy(
+                historyDatePreset = HistoryDatePreset.CUSTOM,
+                historyDateFilterEnabled = true,
                 historyEndEpochDay = epochDay.coerceAtLeast(state.historyStartEpochDay),
             )
         }
@@ -1022,8 +1169,4 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         }
     }
 
-    private companion object {
-        const val CATEGORY_CONTACT = "CONTACT"
-        const val CATEGORY_VISIT = "VISIT"
-    }
 }
