@@ -68,6 +68,10 @@ class CustomerLocationRepository(
         }
         return listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
             .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .filter { location ->
+                val age = (android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
+                age in 0L..120_000L && location.hasAccuracy() && location.accuracy <= 100f
+            }
             .maxByOrNull(Location::getTime)
     }
 

@@ -34,8 +34,11 @@ class BackupArchiveService(
     suspend fun writeBackup(uri: Uri, selectedListIds: Set<Long>): BackupPreview = withContext(Dispatchers.IO) {
         require(selectedListIds.isNotEmpty()) { "백업할 고객리스트를 선택해주세요." }
         val manifest = database.withTransaction { buildManifest(selectedListIds) }
-        context.contentResolver.openOutputStream(uri, "wt").use { output ->
-            requireNotNull(output) { "백업 파일을 열지 못했습니다." }
+        val recoveryDirectory = File(context.filesDir, "backup-recovery").apply { mkdirs() }
+        val staged = File(recoveryDirectory, "${UUID.randomUUID()}.partial")
+        val complete = File(recoveryDirectory, "${staged.nameWithoutExtension}.zip")
+        try {
+        staged.outputStream().use { output ->
             ZipOutputStream(output.buffered()).use { zip ->
                 zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
                 zip.write(manifest.toString().toByteArray(Charsets.UTF_8))
@@ -44,12 +47,28 @@ class BackupArchiveService(
                 appendMedia(zip, manifest.getJSONArray("audio_memos"))
             }
         }
+        check(staged.renameTo(complete)) { "로컬 복구본 저장에 실패했습니다." }
+        // Keep a complete local recovery copy even if the document provider truncates an upload.
+        context.contentResolver.openOutputStream(uri, "wt").use { output ->
+            requireNotNull(output) { "백업 파일을 열지 못했습니다." }
+            complete.inputStream().use { it.copyTo(output) }
+        }
+        recoveryDirectory.listFiles()?.filter { it != complete && it.extension == "zip" }
+            ?.sortedByDescending { it.lastModified() }?.drop(1)?.forEach { it.delete() }
+        } catch (error: Exception) {
+            throw java.io.IOException("백업을 완료하지 못했습니다. 로컬 복구본을 확인해주세요.", error)
+        } finally {
+            staged.delete()
+        }
         preview(manifest)
     }
 
     suspend fun inspect(uri: Uri): BackupPreview = withContext(Dispatchers.IO) {
         preview(readManifest(uri))
     }
+
+    fun localRecoveryCopies(): List<File> = File(context.filesDir, "backup-recovery").listFiles()
+        ?.filter { it.extension == "zip" }?.sortedByDescending { it.lastModified() }.orEmpty()
 
     suspend fun restore(
         uri: Uri,
@@ -59,10 +78,20 @@ class BackupArchiveService(
         val extraction = extractArchive(uri)
         try {
             val manifest = JSONObject(File(extraction, MANIFEST_ENTRY).readText())
+            require(manifest.optString("format") == FORMAT) { "소희야 가자 백업 파일이 아닙니다." }
+            require(manifest.optInt("schemaVersion") in 1..database.openHelper.readableDatabase.version) {
+                "지원하지 않는 백업 버전입니다. 앱 업데이트를 확인해주세요."
+            }
             val available = manifest.getJSONArray("customer_lists").ids()
             val chosen = if (mode == RestoreMode.REPLACE_ALL) available else selectedListIds.intersect(available)
             require(chosen.isNotEmpty()) { "복원할 고객리스트를 선택해주세요." }
             database.withTransaction { restoreManifest(manifest, extraction, chosen, mode) }
+            if (mode == RestoreMode.REPLACE_ALL) manifest.optJSONObject("displaySettings")?.let { settings ->
+                val editor = context.getSharedPreferences("display-settings", Context.MODE_PRIVATE).edit()
+                settings.optString("theme").takeIf { it in setOf("SYSTEM", "LIGHT", "DARK") }?.let { editor.putString("theme", it) }
+                listOf("phone", "address", "notes", "custom").forEach { key -> if (settings.has(key)) editor.putBoolean(key, settings.getBoolean(key)) }
+                editor.apply()
+            }
             chosen.size
         } finally {
             extraction.deleteRecursively()
@@ -75,9 +104,9 @@ class BackupArchiveService(
         val customerFilter = "customerId IN (SELECT id FROM customers WHERE listId IN ($ids))"
         val manifest = JSONObject()
             .put("format", FORMAT)
-            .put("schemaVersion", 7)
+            .put("schemaVersion", db.version)
             .put("createdAtEpochMillis", System.currentTimeMillis())
-            .put("appVersion", "0.7.0")
+            .put("appVersion", context.packageManager.getPackageInfo(context.packageName, 0).versionName)
             .put("customer_lists", queryRows(db, "SELECT * FROM customer_lists WHERE id IN ($ids)"))
             .put("customers", queryRows(db, "SELECT * FROM customers WHERE listId IN ($ids)"))
             .put("customer_custom_fields", queryRows(db, "SELECT * FROM customer_custom_fields WHERE $customerFilter"))
@@ -88,8 +117,10 @@ class BackupArchiveService(
             .put("process_status_logs", queryRows(db, "SELECT * FROM process_status_logs WHERE listId IN ($ids)"))
             .put("dashboard_statuses", queryRows(db, "SELECT * FROM dashboard_statuses"))
             .put("dashboard_settings", queryRows(db, "SELECT * FROM dashboard_settings"))
+            .put("management_periods", queryRows(db, "SELECT * FROM management_periods"))
         manifest.put("photo_memos", mediaRows(db, "photo_memos", ids, "photos"))
         manifest.put("audio_memos", mediaRows(db, "audio_memos", ids, "audio"))
+        manifest.put("displaySettings", JSONObject(context.getSharedPreferences("display-settings", Context.MODE_PRIVATE).all))
         return manifest
     }
 
@@ -113,7 +144,7 @@ class BackupArchiveService(
         for (index in 0 until rows.length()) {
             val row = rows.getJSONObject(index)
             val source = File(row.optString("filePath"))
-            if (!source.isFile) continue
+            require(source.isFile) { "사진 또는 음성 파일이 없어 백업을 중단했습니다." }
             zip.putNextEntry(ZipEntry(row.getString("archivePath")))
             source.inputStream().buffered().use { it.copyTo(zip) }
             zip.closeEntry()
@@ -170,9 +201,19 @@ class BackupArchiveService(
             db.execSQL("DELETE FROM customer_lists")
             db.execSQL("DELETE FROM dashboard_statuses")
             db.execSQL("DELETE FROM dashboard_settings")
-            File(context.filesDir, "media").deleteRecursively()
         }
-        restoreGlobalSettings(db, manifest)
+        if (mode == RestoreMode.REPLACE_ALL) restoreGlobalSettings(db, manifest)
+        // Historical snapshots are append-only; an older backup must not erase them.
+        manifest.optJSONArray("management_periods")?.forEachObject { row ->
+            db.insert("management_periods", SQLiteDatabase.CONFLICT_IGNORE, row.toContentValues())
+        }
+        val statusMap = mutableMapOf<String, String>()
+        if (mode == RestoreMode.MERGE_SELECTED) {
+            manifest.getJSONArray("dashboard_statuses").forEachObject { row ->
+                db.query("SELECT id FROM dashboard_statuses WHERE name = ? ORDER BY orderIndex LIMIT 1", arrayOf(row.getString("name")))
+                    .use { cursor -> if (cursor.moveToFirst()) statusMap[row.getString("id")] = cursor.getString(0) }
+            }
+        }
         val listMap = mutableMapOf<Long, Long>()
         manifest.getJSONArray("customer_lists").forEachObject { row ->
             val oldId = row.getLong("id")
@@ -188,6 +229,10 @@ class BackupArchiveService(
             val values = row.toContentValues(excluding = setOf("id"))
             values.put("listId", nextListId)
             values.putNull("contactIdentifier")
+            if (mode == RestoreMode.MERGE_SELECTED) {
+                val mappedStatus = statusMap[row.optString("dashboardStatusId")]
+                if (mappedStatus == null) values.putNull("dashboardStatusId") else values.put("dashboardStatusId", mappedStatus)
+            }
             customerMap[oldId] = checkedInsert(db, "customers", values)
         }
         restoreCustomerRows(db, manifest, "customer_custom_fields", customerMap, listMap)
@@ -260,7 +305,9 @@ class BackupArchiveService(
             val nextCustomerId = customerMap[row.getLong("customerId")] ?: return@forEachObject
             val nextListId = listMap[row.getLong("listId")] ?: return@forEachObject
             val archived = File(extraction, row.optString("archivePath"))
-            if (!archived.isFile) return@forEachObject
+            require(archived.canonicalPath.startsWith(extraction.canonicalPath + File.separator) && archived.isFile) {
+                "백업의 사진 또는 음성 파일이 없거나 경로가 잘못되었습니다."
+            }
             val destination = File(
                 context.filesDir,
                 "media/$directory/$nextCustomerId/${System.currentTimeMillis()}-${UUID.randomUUID()}.${archived.extension}",
@@ -270,6 +317,10 @@ class BackupArchiveService(
             values.put("listId", nextListId)
             values.put("customerId", nextCustomerId)
             values.put("filePath", destination.absolutePath)
+            if (table == "audio_memos") {
+                values.put("transcriptionState", if (row.optString("transcript").isBlank()) "NONE" else "DONE")
+                values.put("transcriptionError", "")
+            }
             checkedInsert(db, table, values)
         }
     }

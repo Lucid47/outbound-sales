@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
     @Test
-    fun migrationOneToSevenPreservesDataAndAddsMapAndMediaSchema() {
+    fun migrationOneToEightPreservesDataAndAddsMapAndMediaSchema() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TEST_DATABASE)
         val legacy = FrameworkSQLiteOpenHelperFactory().create(
@@ -42,6 +42,7 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8,
             )
             .build()
         migrated.openHelper.writableDatabase
@@ -99,6 +100,8 @@ class AppDatabaseMigrationTest {
             }
         }
         assertTrue("sourceType" in audioColumnNames)
+        assertTrue("transcriptWordsJson" in audioColumnNames)
+        assertTrue("transcriptionState" in audioColumnNames)
         val statuses = migrated.openHelper.readableDatabase.query("SELECT COUNT(*) FROM dashboard_statuses")
         statuses.use {
             assertTrue(it.moveToFirst())

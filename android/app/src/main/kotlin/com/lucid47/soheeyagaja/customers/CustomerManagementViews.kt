@@ -23,12 +23,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -108,6 +110,7 @@ fun CustomerManagementScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lists by viewModel.customerLists.collectAsStateWithLifecycle()
     val customers by viewModel.customers.collectAsStateWithLifecycle()
+    val displaySettings = com.lucid47.soheeyagaja.ui.rememberDisplaySettings()
     val selectedCustomer by viewModel.selectedCustomer.collectAsStateWithLifecycle()
     val selectedCustomerHistory by viewModel.selectedCustomerHistory.collectAsStateWithLifecycle()
     val todaySchedule by viewModel.todaySchedule.collectAsStateWithLifecycle()
@@ -220,7 +223,10 @@ fun CustomerManagementScreen(
                 }
             } else {
                 items(customers, key = { it.customer.id }) { record ->
-                    CustomerCard(record = record, onClick = { viewModel.openCustomer(record.customer.id) })
+                    CustomerCard(record = record, display = displaySettings, onClick = { viewModel.openCustomer(record.customer.id) },
+                        onPhoto = { viewModel.openPhotoMemo(record.customer.id) },
+                        onAudio = { viewModel.openAudioMemo(record.customer.id) },
+                        onVisit = { viewModel.requestVisit(record.customer.id) })
                 }
             }
         }
@@ -299,7 +305,7 @@ fun CustomerManagementScreen(
         AlertDialog(
             onDismissRequest = viewModel::cancelListDelete,
             title = { Text("고객리스트 영구삭제") },
-            text = { Text("${list?.name.orEmpty()} 리스트와 포함된 ${list?.customerCount ?: 0}명의 고객을 삭제합니다.") },
+            text = { Text("${list?.name.orEmpty()} 리스트와 포함된 ${list?.customerCount ?: 0}명의 고객을 삭제합니다. 활동 기록의 텍스트는 활동 보관함에 남습니다.") },
             confirmButton = {
                 TextButton(onClick = viewModel::confirmListDelete) {
                     Text("영구삭제", color = MaterialTheme.colorScheme.error)
@@ -313,7 +319,7 @@ fun CustomerManagementScreen(
         AlertDialog(
             onDismissRequest = viewModel::cancelCustomerDelete,
             title = { Text("고객 영구삭제") },
-            text = { Text("이 고객 정보를 삭제합니다. 휴대폰 연락처는 삭제하지 않습니다.") },
+            text = { Text("이 고객 정보를 삭제합니다. 활동 기록의 텍스트는 활동 보관함에 남으며, 휴대폰 연락처는 삭제하지 않습니다.") },
             confirmButton = {
                 TextButton(onClick = viewModel::confirmCustomerDelete) {
                     Text("영구삭제", color = MaterialTheme.colorScheme.error)
@@ -329,12 +335,28 @@ fun CustomerManagementScreen(
             onDismissRequest = viewModel::cancelVisit,
             title = { Text("상세한 히스토리를 기록하겠습니까?") },
             text = { Text("빠른 방문은 현재 날짜·시간과 위치를 주소로 남깁니다. 상세 기록에서는 텍스트 메모를 함께 저장할 수 있습니다.") },
-            confirmButton = { TextButton(onClick = viewModel::openDetailedVisitMemo) { Text("상세 기록") } },
+            confirmButton = {
+                Column {
+                    TextButton(onClick = viewModel::openDetailedVisitMemo) { Text("텍스트 메모") }
+                    TextButton(onClick = {
+                        val id = uiState.visitPromptCustomerId ?: return@TextButton
+                        recordQuickVisit()
+                        viewModel.openPhotoMemo(id)
+                    }) { Text("사진 메모") }
+                    TextButton(onClick = {
+                        val id = uiState.visitPromptCustomerId ?: return@TextButton
+                        recordQuickVisit()
+                        viewModel.openAudioMemo(id)
+                    }) { Text("음성 메모") }
+                }
+            },
             dismissButton = { TextButton(onClick = ::recordQuickVisit) { Text("빠른 방문") } },
         )
     }
 
     uiState.memoEditor?.let { editor ->
+        val recent by viewModel.memoHistory.collectAsStateWithLifecycle()
+        var openedMemo by remember { mutableStateOf<HistoryEntryRecord?>(null) }
         AlertDialog(
             onDismissRequest = viewModel::closeMemoEditor,
             title = { Text(if (editor.mode == MemoMode.VISIT_DETAIL) "상세 방문 메모" else "텍스트 메모") },
@@ -348,6 +370,14 @@ fun CustomerManagementScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     editor.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    Text("최근 텍스트 메모", style = MaterialTheme.typography.titleSmall)
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 180.dp)) {
+                        items(recent.filter { it.mediaType == null && it.detail.isNotBlank() && it.category == "VISIT" }) { entry ->
+                            TextButton(onClick = { openedMemo = entry }) {
+                                Text(entry.detail, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -358,6 +388,10 @@ fun CustomerManagementScreen(
             },
             dismissButton = { TextButton(onClick = viewModel::closeMemoEditor) { Text("취소") } },
         )
+        openedMemo?.let { entry ->
+            AlertDialog(onDismissRequest = { openedMemo = null }, title = { Text("텍스트 메모") },
+                text = { Text(entry.detail) }, confirmButton = { TextButton(onClick = { openedMemo = null }) { Text("닫기") } })
+        }
     }
 }
 
@@ -419,7 +453,7 @@ private fun CustomerListControl(
 }
 
 @Composable
-private fun CustomerCard(record: CustomerWithFields, onClick: () -> Unit) {
+private fun CustomerCard(record: CustomerWithFields, display: com.lucid47.soheeyagaja.ui.DisplaySettings, onClick: () -> Unit, onPhoto: () -> Unit, onAudio: () -> Unit, onVisit: () -> Unit) {
     val customer = record.customer
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
@@ -444,14 +478,22 @@ private fun CustomerCard(record: CustomerWithFields, onClick: () -> Unit) {
                     Icon(Icons.Default.CheckCircle, contentDescription = "완료", tint = Color(0xFF16A34A))
                 }
             }
-            Text(customer.phone.ifBlank { "연락처 없음" }, style = MaterialTheme.typography.titleMedium)
-            Text(
+            if (display.phone) Text(customer.phone.ifBlank { "연락처 없음" }, style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                IconButton(onClick = onVisit) { Icon(Icons.Default.LocationOn, "방문") }
+                IconButton(onClick = onPhoto) { Icon(Icons.Default.PhotoCamera, "사진 메모") }
+                IconButton(onClick = onAudio) { Icon(Icons.Default.Mic, "음성 메모") }
+            }
+            if (display.address) Text(
                 customer.address.ifBlank { "주소 없음" },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (customer.notes.isNotBlank()) {
+            if (display.custom) record.customFields.forEach { field ->
+                Text("${field.label}: ${field.value}", maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (display.notes && customer.notes.isNotBlank()) {
                 Text(
                     customer.notes,
                     style = MaterialTheme.typography.bodySmall,

@@ -35,7 +35,7 @@ class CustomerMediaRepositoryTest {
     fun tearDown() = database.close()
 
     @Test
-    fun savedPhotoAndAudioAppearInCustomerHistory() = runBlocking {
+    fun savedPhotoAndAudioAppearInCustomerHistory() = runBlocking<Unit> {
         val now = System.currentTimeMillis()
         val listId = database.customerListDao().insert(
             CustomerListEntity(name = "미디어", sourceName = "test", createdAtEpochMillis = now),

@@ -19,7 +19,9 @@ import org.vosk.Recognizer
 class RecordedAudioTranscriber(private val context: Context) {
     fun isModelReady(): Boolean = KoreanSpeechModel.isReady(context)
 
-    suspend fun transcribe(file: File, onProgress: (String) -> Unit = {}): String = withContext(Dispatchers.IO) {
+    suspend fun transcribe(file: File, onProgress: (String) -> Unit = {}): String = transcribeDetailed(file, onProgress).text
+
+    suspend fun transcribeDetailed(file: File, onProgress: (String) -> Unit = {}): TranscriptionResult = withContext(Dispatchers.IO) {
         require(file.exists() && file.length() > 0L) { "전사할 음성 파일을 찾지 못했습니다." }
         onProgress("한국어 전사 모델을 확인하는 중...")
         val modelDirectory = KoreanSpeechModel.ensureReady(context, onProgress)
@@ -29,21 +31,29 @@ class RecordedAudioTranscriber(private val context: Context) {
         Model(modelDirectory.absolutePath).use { model ->
             var recognizer: Recognizer? = null
             val completedSegments = mutableListOf<String>()
+            val words = org.json.JSONArray()
+            fun acceptResult(raw: String) {
+                extractVoskText(raw)?.let(completedSegments::add)
+                JSONObject(raw).optJSONArray("result")?.let { result ->
+                    for (index in 0 until result.length()) words.put(result.getJSONObject(index))
+                }
+            }
             try {
                 decodePcm16(file) { bytes, sampleRate, channelCount ->
                     val activeRecognizer = recognizer ?: Recognizer(model, sampleRate.toFloat()).also {
                         recognizer = it
+                        it.setWords(true)
                     }
                     val mono = downmixPcm16(bytes, channelCount)
                     if (mono.isNotEmpty() && activeRecognizer.acceptWaveForm(mono, mono.size)) {
-                        extractVoskText(activeRecognizer.result)?.let(completedSegments::add)
+                        acceptResult(activeRecognizer.result)
                     }
                 }
                 val activeRecognizer = checkNotNull(recognizer) { "음성 데이터가 비어 있습니다." }
-                extractVoskText(activeRecognizer.finalResult)?.let(completedSegments::add)
+                acceptResult(activeRecognizer.finalResult)
                 val text = completedSegments.joinToString(" ").replace(Regex("\\s+"), " ").trim()
                 check(text.isNotEmpty()) { "음성에서 인식 가능한 한국어 문장을 찾지 못했습니다." }
-                text
+                TranscriptionResult(text, words.toString())
             } finally {
                 recognizer?.close()
             }
@@ -137,6 +147,8 @@ internal fun extractVoskText(json: String): String? =
     runCatching { JSONObject(json).optString("text").replace(Regex("\\s+"), " ").trim() }
         .getOrNull()
         ?.takeIf(String::isNotBlank)
+
+data class TranscriptionResult(val text: String, val wordsJson: String)
 
 internal fun downmixPcm16(bytes: ByteArray, channelCount: Int): ByteArray {
     require(channelCount > 0) { "음성 채널 수가 올바르지 않습니다." }

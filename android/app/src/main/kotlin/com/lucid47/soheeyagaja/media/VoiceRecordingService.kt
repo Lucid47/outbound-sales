@@ -26,6 +26,7 @@ data class VoiceRecordingState(
     val filePath: String? = null,
     val durationMillis: Long = 0L,
     val errorMessage: String? = null,
+    val customerId: Long? = null,
 )
 
 class VoiceRecordingService : Service() {
@@ -41,7 +42,7 @@ class VoiceRecordingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startRecording(intent.getStringExtra(EXTRA_FILE_PATH).orEmpty())
+            ACTION_START -> startRecording(intent.getStringExtra(EXTRA_FILE_PATH).orEmpty(), intent.getLongExtra("customerId", -1L))
             ACTION_PAUSE -> pauseRecording()
             ACTION_RESUME -> resumeRecording()
             ACTION_STOP -> stopRecording()
@@ -58,8 +59,8 @@ class VoiceRecordingService : Service() {
         super.onDestroy()
     }
 
-    private fun startRecording(path: String) {
-        if (path.isBlank() || recorder != null) return
+    private fun startRecording(path: String, customerId: Long) {
+        if (path.isBlank() || customerId <= 0 || recorder != null || _state.value.status == VoiceRecordingStatus.FINISHED) return
         runCatching {
             val file = File(path).apply { parentFile?.mkdirs() }
             val next = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this) else {
@@ -72,13 +73,14 @@ class VoiceRecordingService : Service() {
             next.setAudioEncodingBitRate(128_000)
             next.setAudioSamplingRate(44_100)
             next.setOutputFile(file.absolutePath)
+            recorder = next
             next.prepare()
             next.start()
             recorder = next
             startedAt = System.currentTimeMillis()
             pausedAt = 0L
             totalPaused = 0L
-            _state.value = VoiceRecordingState(VoiceRecordingStatus.RECORDING, file.absolutePath)
+            _state.value = VoiceRecordingState(VoiceRecordingStatus.RECORDING, file.absolutePath, customerId = customerId)
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.app_icon)
                 .setContentTitle("음성 메모 녹음 중")
@@ -119,6 +121,7 @@ class VoiceRecordingService : Service() {
                 _state.value = _state.value.copy(
                     status = VoiceRecordingStatus.PAUSED,
                     durationMillis = elapsedDuration(),
+                    customerId = _state.value.customerId,
                 )
             }
             .onFailure(::recordError)
@@ -144,6 +147,7 @@ class VoiceRecordingService : Service() {
                 recorder = null
                 _state.value = VoiceRecordingState(
                     status = VoiceRecordingStatus.FINISHED,
+                    customerId = _state.value.customerId,
                     filePath = path,
                     durationMillis = elapsedDuration(),
                 )
@@ -171,6 +175,10 @@ class VoiceRecordingService : Service() {
     }
 
     private fun recordError(error: Throwable) {
+        runCatching { recorder?.release() }
+        recorder = null
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
         _state.value = _state.value.copy(
             status = VoiceRecordingStatus.ERROR,
             errorMessage = error.message ?: "녹음 중 오류가 발생했습니다.",
@@ -197,10 +205,10 @@ class VoiceRecordingService : Service() {
         private val _state = MutableStateFlow(VoiceRecordingState())
         val state: StateFlow<VoiceRecordingState> = _state.asStateFlow()
 
-        fun start(context: Context, path: String) {
+        fun start(context: Context, path: String, customerId: Long) {
             ContextCompatCompat.startForegroundService(
                 context,
-                Intent(context, VoiceRecordingService::class.java).setAction(ACTION_START).putExtra(EXTRA_FILE_PATH, path),
+                Intent(context, VoiceRecordingService::class.java).setAction(ACTION_START).putExtra(EXTRA_FILE_PATH, path).putExtra("customerId", customerId),
             )
         }
 

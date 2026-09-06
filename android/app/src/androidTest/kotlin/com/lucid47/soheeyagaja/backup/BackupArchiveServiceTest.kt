@@ -42,7 +42,37 @@ class BackupArchiveServiceTest {
     }
 
     @Test
-    fun selectedBackupRestoresListCustomerAndMediaAsCopy() = runBlocking {
+    fun failedFullRestorePreservesExistingMediaAndRows() = runBlocking<Unit> {
+        val listId = database.customerListDao().insert(CustomerListEntity(name = "복원 실패 시험", sourceName = "test", createdAtEpochMillis = 1))
+        val customerId = CustomerManagementRepository(database).createCustomer(listId, CustomerDraft(name = "시험 고객", phone = "01000000000"))
+        val media = CustomerMediaRepository(context, database)
+        val photo = media.newCameraFile(customerId).apply { writeBytes(byteArrayOf(7, 8, 9)) }
+        media.saveCapturedPhoto(customerId, photo)
+        val savedPhoto = File(database.attachmentDao().getAllPhotos().single().filePath)
+        val expected = savedPhoto.readBytes()
+        archive.writeBackup(Uri.fromFile(backupFile), setOf(listId))
+        val broken = File(context.cacheDir, "broken-${System.nanoTime()}.zip")
+        try {
+            java.util.zip.ZipInputStream(backupFile.inputStream()).use { input ->
+                java.util.zip.ZipOutputStream(broken.outputStream()).use { output ->
+                    while (true) {
+                        val entry = input.nextEntry ?: break
+                        if (entry.name == "backup.json") {
+                            output.putNextEntry(java.util.zip.ZipEntry(entry.name)); input.copyTo(output); output.closeEntry()
+                        }
+                        input.closeEntry()
+                    }
+                }
+            }
+            assertTrue(runCatching { archive.restore(Uri.fromFile(broken), setOf(listId), RestoreMode.REPLACE_ALL) }.isFailure)
+            assertTrue(database.customerDao().getById(customerId) != null)
+            assertTrue(savedPhoto.isFile)
+            assertTrue(expected.contentEquals(savedPhoto.readBytes()))
+        } finally { broken.delete(); savedPhoto.delete(); photo.delete() }
+    }
+
+    @Test
+    fun selectedBackupRestoresListCustomerAndMediaAsCopy() = runBlocking<Unit> {
         val now = System.currentTimeMillis()
         val listId = database.customerListDao().insert(
             CustomerListEntity(name = "2026 하반기", sourceName = "test", createdAtEpochMillis = now),

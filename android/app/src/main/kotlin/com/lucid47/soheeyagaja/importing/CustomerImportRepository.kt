@@ -23,11 +23,22 @@ data class ImportResult(
 class CustomerImportRepository(private val database: AppDatabase) {
     fun observeCustomerLists() = database.customerListDao().observeSummaries()
 
+    fun previewCsv(source: InputStream, page: Int): Pair<List<ImportedCustomer>, Boolean> {
+        val buffered = source.bufferedForDetection()
+        val charset = buffered.detectCharsetAndSkipBom()
+        val reader = CustomerCsvBatchReader(InputStreamReader(buffered, charset))
+        repeat(page) { if (reader.readBatch() == null) return emptyList<ImportedCustomer>() to false }
+        val batch = reader.readBatch() ?: return emptyList<ImportedCustomer>() to false
+        return batch.customers to (reader.readBatch() != null)
+    }
+
     suspend fun importCsv(
         source: InputStream,
         listName: String,
         sourceName: String,
         onProgress: (ImportProgress) -> Unit,
+        selectAll: Boolean = true,
+        selectionExceptions: Set<Long> = emptySet(),
     ): ImportResult = database.withTransaction {
         val createdAt = System.currentTimeMillis()
         val listId = database.customerListDao().insert(
@@ -43,12 +54,14 @@ class CustomerImportRepository(private val database: AppDatabase) {
         val charset = buffered.detectCharsetAndSkipBom()
         val reader = CustomerCsvBatchReader(InputStreamReader(buffered, charset))
         var lastProgress = ImportProgress()
+        var inserted = 0L
 
         while (true) {
             val batch = reader.readBatch() ?: break
             if (batch.customers.isNotEmpty()) {
                 database.customerDao().insert(
-                    batch.customers.map { customer ->
+                    batch.customers.filter { if (selectAll) it.sourceRow !in selectionExceptions else it.sourceRow in selectionExceptions }.map { customer ->
+                        inserted += 1
                         CustomerEntity(
                             listId = listId,
                             sourceRow = customer.sourceRow,
@@ -69,7 +82,7 @@ class CustomerImportRepository(private val database: AppDatabase) {
             onProgress(lastProgress)
         }
 
-        lastProgress = reader.currentProgress()
+        lastProgress = reader.currentProgress().copy(acceptedRows = inserted)
         onProgress(lastProgress)
 
         require(lastProgress.acceptedRows > 0) { "추가할 수 있는 고객 데이터가 없습니다." }

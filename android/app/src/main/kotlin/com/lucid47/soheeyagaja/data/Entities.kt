@@ -139,6 +139,9 @@ data class AudioMemoEntity(
     val durationMillis: Long,
     val transcript: String,
     val sourceType: String = "AUDIO_MEMO",
+    @ColumnInfo(defaultValue = "'[]'") val transcriptWordsJson: String = "[]",
+    @ColumnInfo(defaultValue = "'NONE'") val transcriptionState: String = "NONE",
+    @ColumnInfo(defaultValue = "''") val transcriptionError: String = "",
     val createdAtEpochMillis: Long,
 )
 

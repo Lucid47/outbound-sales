@@ -37,6 +37,12 @@ interface AttachmentDao {
     @Query("UPDATE audio_memos SET transcript = :transcript WHERE id = :id")
     suspend fun updateAudioTranscript(id: Long, transcript: String)
 
+    @Query("UPDATE audio_memos SET transcript = :text, transcriptWordsJson = :words, transcriptionState = 'DONE', transcriptionError = '' WHERE id = :id")
+    suspend fun completeTranscription(id: Long, text: String, words: String)
+
+    @Query("UPDATE audio_memos SET transcriptionState = :state, transcriptionError = :error WHERE id = :id")
+    suspend fun setTranscriptionState(id: Long, state: String, error: String = "")
+
     @Query(
         "SELECT EXISTS(SELECT 1 FROM audio_memos WHERE customerId = :customerId " +
             "AND sourceType = :sourceType AND createdAtEpochMillis = :occurredAt)",

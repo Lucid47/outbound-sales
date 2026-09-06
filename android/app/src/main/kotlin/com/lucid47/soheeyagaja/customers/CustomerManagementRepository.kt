@@ -1,4 +1,5 @@
 package com.lucid47.soheeyagaja.customers
+import kotlinx.coroutines.flow.first
 
 import androidx.room.withTransaction
 import com.lucid47.soheeyagaja.data.AppDatabase
@@ -81,6 +82,9 @@ class CustomerManagementRepository(private val database: AppDatabase) {
 
         database.customerDao().update(
             existing.copy(
+                latitude = existing.latitude.takeIf { existing.address == draft.address.trim() },
+                longitude = existing.longitude.takeIf { existing.address == draft.address.trim() },
+                geocodedAtEpochMillis = existing.geocodedAtEpochMillis.takeIf { existing.address == draft.address.trim() },
                 name = draft.name.trim(),
                 phone = draft.phone.trim(),
                 normalizedPhone = normalizedPhone,
@@ -107,6 +111,7 @@ class CustomerManagementRepository(private val database: AppDatabase) {
         val existing = requireNotNull(database.customerDao().getById(customerId)) {
             "고객을 찾지 못했습니다."
         }
+        archiveActivity("삭제 고객 · ${existing.name}", database.activityDao().observeHistoryForCustomer(customerId).first())
         database.customerDao().deleteById(customerId)
         database.customerListDao().touch(existing.listId, System.currentTimeMillis())
     }
@@ -120,7 +125,15 @@ class CustomerManagementRepository(private val database: AppDatabase) {
 
     suspend fun deleteCustomerList(listId: Long) = database.withTransaction {
         requireNotNull(database.customerListDao().getById(listId)) { "고객리스트를 찾지 못했습니다." }
+        archiveActivity("삭제 리스트 · ${database.customerListDao().getById(listId)?.name.orEmpty()}", database.activityDao().observeHistoryForList(listId).first())
         database.customerListDao().deleteById(listId)
+    }
+
+    private suspend fun archiveActivity(name: String, entries: List<com.lucid47.soheeyagaja.data.HistoryEntryRecord>) {
+        if (entries.isEmpty()) return
+        val dates = entries.map { java.time.Instant.ofEpochMilli(it.occurredAtEpochMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay() }
+        database.managementPeriodDao().save(com.lucid47.soheeyagaja.data.ManagementPeriod(name = name,
+            startEpochDay = dates.min(), endEpochDay = dates.max(), snapshotText = com.lucid47.soheeyagaja.data.historySnapshot(entries)))
     }
 
     private suspend fun replaceCustomFields(customerId: Long, fields: List<CustomFieldDraft>) {

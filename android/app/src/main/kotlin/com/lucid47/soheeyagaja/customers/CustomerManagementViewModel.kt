@@ -365,6 +365,10 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
             customerId?.let(activityRepository::observeHistoryForCustomer) ?: flowOf(emptyList())
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val memoHistory = _uiState.map { it.memoEditor?.customerId }.distinctUntilChanged()
+        .flatMapLatest { id -> id?.let(activityRepository::observeHistoryForCustomer) ?: flowOf(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val historyDialogEntries = _uiState
         .map { state -> state.historyCustomerId }
         .distinctUntilChanged()
@@ -1082,6 +1086,14 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     }
 
     fun openAudioMemo(customerId: Long) {
+        val recording = com.lucid47.soheeyagaja.media.VoiceRecordingService.state.value
+        if (recording.customerId != null && recording.customerId != customerId &&
+            recording.status in setOf(com.lucid47.soheeyagaja.media.VoiceRecordingStatus.RECORDING,
+                com.lucid47.soheeyagaja.media.VoiceRecordingStatus.PAUSED,
+                com.lucid47.soheeyagaja.media.VoiceRecordingStatus.FINISHED)) {
+            showError(IllegalStateException("다른 고객의 녹음을 먼저 저장하거나 취소해주세요."))
+            return
+        }
         _uiState.update { it.copy(audioMemoCustomerId = customerId) }
     }
 
@@ -1093,6 +1105,8 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
 
     fun isSpeechModelReady(): Boolean = audioTranscriber.isModelReady()
 
+    private val savingAudioPaths = mutableSetOf<String>()
+
     fun saveAudioMemo(
         customerId: Long,
         file: File,
@@ -1100,9 +1114,12 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
         transcript: String,
         autoTranscribe: Boolean = true,
     ) {
+        if (!savingAudioPaths.add(file.absolutePath)) return
         viewModelScope.launch {
+            try {
             runCatching { mediaRepository.saveAudioMemo(customerId, file, durationMillis, transcript) }
                 .onSuccess { audioId ->
+                    com.lucid47.soheeyagaja.media.VoiceRecordingService.resetFinished()
                     _uiState.update {
                         it.copy(
                             statusMessage = when {
@@ -1116,6 +1133,7 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
                     if (transcript.isBlank() && autoTranscribe) transcribeAudio(audioId, file)
                 }
                 .onFailure(::showError)
+            } finally { savingAudioPaths.remove(file.absolutePath) }
         }
     }
 
@@ -1124,23 +1142,8 @@ class CustomerManagementViewModel(application: Application) : AndroidViewModel(a
     }
 
     private suspend fun transcribeAudio(audioId: Long, file: File) {
-        if (audioId in _audioTranscriptionProgress.value) return
-        _audioTranscriptionProgress.update { it + (audioId to "전사 준비 중...") }
-        runCatching {
-            audioTranscriber.transcribe(file) { progress ->
-                _audioTranscriptionProgress.update { it + (audioId to progress) }
-            }
-        }
-            .onSuccess { transcript ->
-                mediaRepository.updateAudioTranscript(audioId, transcript)
-                _uiState.update { it.copy(statusMessage = "음성 메모 전사가 완료되었습니다.", errorMessage = null) }
-            }
-            .onFailure { error ->
-                _uiState.update {
-                    it.copy(errorMessage = "음성은 저장했지만 기기 내 자동 전사에 실패했습니다. ${error.message.orEmpty()}".trim())
-                }
-            }
-        _audioTranscriptionProgress.update { it - audioId }
+        database.attachmentDao().setTranscriptionState(audioId, "QUEUED")
+        com.lucid47.soheeyagaja.media.AudioTranscriptionWorker.enqueue(getApplication(), audioId, file.absolutePath)
     }
 
     fun deletePhotoMemo(photo: PhotoMemoEntity) {

@@ -185,6 +185,15 @@ fun HistoryActivityScreen(
     val selectedList = lists.firstOrNull { it.id == state.selectedListId }
     val selectedHistoryCustomer = customers.firstOrNull { it.customer.id == state.historyCustomerFilterId }
     var customerPickerVisible by remember { mutableStateOf(false) }
+    var periodsVisible by remember { mutableStateOf(false) }
+    if (periodsVisible) ManagementPeriodDialog(entries,
+        start = if (state.historyDateFilterEnabled) state.historyStartEpochDay else entries.minOfOrNull { Instant.ofEpochMilli(it.occurredAtEpochMillis).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay() } ?: LocalDate.now().toEpochDay(),
+        end = if (state.historyDateFilterEnabled) state.historyEndEpochDay else LocalDate.now().toEpochDay(),
+        onApply = { start, end ->
+            viewModel.setHistoryDateFilterEnabled(true)
+            viewModel.setHistoryStartEpochDay(start)
+            viewModel.setHistoryEndEpochDay(end)
+        }, onDismiss = { periodsVisible = false })
 
     Scaffold(
         modifier = modifier,
@@ -201,6 +210,7 @@ fun HistoryActivityScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item { ActivityListSelector(lists, selectedList, viewModel::selectList) }
+            item { OutlinedButton(onClick = { periodsVisible = true }) { Text("관리 기간 · 활동 보관") } }
             item {
                 HistoryDisplayModeSelector(state.historyDisplayMode, viewModel::setHistoryDisplayMode)
             }

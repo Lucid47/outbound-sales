@@ -17,6 +17,7 @@ data class MessageHistoryImportResult(
     val duplicateCount: Int,
     val unmatchedCount: Int,
     val invalidCount: Int,
+    val warning: String = "",
 ) {
     fun summary(): String = buildString {
         if (scannedCount == 0) {
@@ -25,8 +26,9 @@ data class MessageHistoryImportResult(
         }
         append("SMS/MMS ${scannedCount}건을 읽어 ${importedCount}건을 고객 히스토리에 추가했습니다.")
         if (duplicateCount > 0) append(" 중복 ${duplicateCount}건 제외.")
-        if (unmatchedCount > 0) append(" 고객 미매칭 ${unmatchedCount}건.")
+        if (unmatchedCount > 0) append(" 선택한 고객리스트에 일치하는 번호가 없는 기록 ${unmatchedCount}건.")
         if (invalidCount > 0) append(" 형식 오류 ${invalidCount}건.")
+        if (warning.isNotBlank()) append(" $warning")
     }
 }
 
@@ -43,6 +45,8 @@ class MessageHistoryImportRepository(
 ) {
     suspend fun importDeviceMessages(listId: Long, days: Int?): MessageHistoryImportResult =
         withContext(Dispatchers.IO) {
+            check(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_SMS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED) { "문자 읽기 권한이 없습니다. 설정에서 소희야 가자의 SMS 권한을 허용해주세요." }
             val since = days?.let { System.currentTimeMillis() - it * MILLIS_PER_DAY }
             val types = intArrayOf(
                 Telephony.Sms.MESSAGE_TYPE_INBOX,
@@ -55,13 +59,22 @@ class MessageHistoryImportRepository(
                 selectionArgs += since.toString()
             }
             val records = mutableListOf<MessageRecord>()
+            var total = MessageHistoryImportResult(0, 0, 0, 0, 0)
+            suspend fun flush() {
+                if (records.isEmpty()) return
+                val batch = importRecords(listId, records)
+                total = MessageHistoryImportResult(total.scannedCount + batch.scannedCount,
+                    total.importedCount + batch.importedCount, total.duplicateCount + batch.duplicateCount,
+                    total.unmatchedCount + batch.unmatchedCount, total.invalidCount + batch.invalidCount)
+                records.clear()
+            }
             context.contentResolver.query(
                 Telephony.Sms.CONTENT_URI,
                 arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
                 selectionParts.joinToString(" AND "),
                 selectionArgs.toTypedArray(),
                 "${Telephony.Sms.DATE} DESC",
-            )?.use { cursor ->
+            ).let { requireNotNull(it) { "SMS 저장소가 조회 결과를 반환하지 않았습니다. 권한과 기본 메시지 앱을 확인해주세요." } }.use { cursor ->
                 val addressIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
                 val bodyIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)
                 val dateIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)
@@ -78,20 +91,32 @@ class MessageHistoryImportRepository(
                         occurredAtEpochMillis = cursor.getLong(dateIndex),
                         type = messageType,
                     )
+                    if (records.size >= 200) flush()
                 }
             }
-            records += readMmsRecords(since)
-            importRecords(listId, records)
+            var warning = ""
+            try {
+                flush()
+                readMmsRecords(since) { record ->
+                    records += record
+                    if (records.size >= 200) flush()
+                }
+            } catch (error: SecurityException) {
+                warning = "MMS 저장소 접근이 허용되지 않아 SMS만 처리했습니다."
+            } catch (error: java.io.IOException) {
+                warning = "MMS 읽기 오류로 SMS만 처리했습니다."
+            }
+            flush()
+            total.copy(warning = warning)
         }
 
-    private fun readMmsRecords(sinceEpochMillis: Long?): List<MessageRecord> {
+    private suspend fun readMmsRecords(sinceEpochMillis: Long?, consume: suspend (MessageRecord) -> Unit) {
         val selectionParts = mutableListOf("msg_box IN (?, ?)")
         val selectionArgs = mutableListOf(MMS_BOX_INBOX.toString(), MMS_BOX_SENT.toString())
         sinceEpochMillis?.let {
             selectionParts += "date >= ?"
             selectionArgs += (it / 1_000L).toString()
         }
-        val records = mutableListOf<MessageRecord>()
         context.contentResolver.query(
             Telephony.Mms.CONTENT_URI,
             arrayOf("_id", "date", "msg_box", "sub"),
@@ -115,7 +140,7 @@ class MessageHistoryImportRepository(
                     if (parts.text.isNotBlank()) add(parts.text)
                     if (parts.attachmentCount > 0) add("[MMS 첨부 ${parts.attachmentCount}개]")
                 }
-                records += MessageRecord(
+                consume(MessageRecord(
                     phoneNumbers = addresses,
                     body = bodyParts.joinToString("\n"),
                     occurredAtEpochMillis = cursor.getLong(dateIndex) * 1_000L,
@@ -124,10 +149,9 @@ class MessageHistoryImportRepository(
                     } else {
                         ActivityRepository.TYPE_MMS_OUTGOING
                     },
-                )
+                ))
             }
         }
-        return records
     }
 
     private fun readMmsAddresses(messageId: Long, requiredType: Int): List<String> {
@@ -193,8 +217,8 @@ class MessageHistoryImportRepository(
         records: List<MessageRecord>,
     ): MessageHistoryImportResult = database.withTransaction {
         val uniqueCustomersByPhone = database.customerDao().getByList(listId)
-            .filter { it.normalizedPhone.isNotBlank() }
-            .groupBy { it.normalizedPhone }
+            .filter { normalizeMessagePhone(it.phone).isNotBlank() }
+            .groupBy { normalizeMessagePhone(it.phone) }
             .mapValues { (_, matches) -> matches.singleOrNull() }
         var imported = 0
         var duplicate = 0
@@ -202,17 +226,17 @@ class MessageHistoryImportRepository(
         var invalid = 0
 
         records.forEach { record ->
-            val phones = record.phoneNumbers.map(ImportedCustomer::normalizePhone).filter(String::isNotBlank).distinct()
+            val phones = record.phoneNumbers.map(::normalizeMessagePhone).filter(String::isNotBlank).distinct()
             if (phones.isEmpty() || record.body.isBlank() || record.occurredAtEpochMillis <= 0L) {
                 invalid += 1
                 return@forEach
             }
             val matchedCustomers = phones.mapNotNull(uniqueCustomersByPhone::get).distinctBy { it.id }
-            val customer = matchedCustomers.singleOrNull()
-            if (customer == null) {
+            if (matchedCustomers.isEmpty()) {
                 unmatched += 1
                 return@forEach
             }
+            matchedCustomers.forEach customerLoop@ { customer ->
             if (
                 database.activityDao().hasImportedMessage(
                     customerId = customer.id,
@@ -222,7 +246,7 @@ class MessageHistoryImportRepository(
                 )
             ) {
                 duplicate += 1
-                return@forEach
+                return@customerLoop
             }
             database.activityDao().insertContactLog(
                 ContactLogEntity(
@@ -235,6 +259,7 @@ class MessageHistoryImportRepository(
                 ),
             )
             imported += 1
+            }
         }
         if (imported > 0) database.customerListDao().touch(listId, System.currentTimeMillis())
         MessageHistoryImportResult(records.size, imported, duplicate, unmatched, invalid)
@@ -250,3 +275,15 @@ class MessageHistoryImportRepository(
 }
 
 private data class MmsParts(val text: String, val attachmentCount: Int)
+
+internal fun normalizeMessagePhone(value: String): String {
+    val address = value.substringBefore("/TYPE=", value).removePrefix("tel:").trim()
+    if ('@' in address) return ""
+    val digits = address.filter(Char::isDigit)
+    val national = when {
+        digits.startsWith("0082") -> digits.drop(4)
+        digits.startsWith("82") && digits.length >= 11 -> digits.drop(2)
+        else -> return digits
+    }
+    return if (national.startsWith("0")) national else "0$national"
+}

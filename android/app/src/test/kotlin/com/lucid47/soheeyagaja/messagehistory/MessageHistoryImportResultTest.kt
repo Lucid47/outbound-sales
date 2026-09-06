@@ -31,7 +31,7 @@ class MessageHistoryImportResultTest {
         )
 
         assertEquals(
-            "SMS/MMS 8건을 읽어 3건을 고객 히스토리에 추가했습니다. 중복 2건 제외. 고객 미매칭 2건. 형식 오류 1건.",
+            "SMS/MMS 8건을 읽어 3건을 고객 히스토리에 추가했습니다. 중복 2건 제외. 선택한 고객리스트에 일치하는 번호가 없는 기록 2건. 형식 오류 1건.",
             result.summary(),
         )
     }

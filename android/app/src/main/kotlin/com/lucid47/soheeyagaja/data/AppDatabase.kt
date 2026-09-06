@@ -21,8 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProcessStatusLogEntity::class,
         PhotoMemoEntity::class,
         AudioMemoEntity::class,
+        ManagementPeriod::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -31,6 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun activityDao(): ActivityDao
     abstract fun dashboardDao(): DashboardDao
     abstract fun attachmentDao(): AttachmentDao
+    abstract fun managementPeriodDao(): ManagementPeriodDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -47,6 +49,7 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
                 .build()
                 .also { instance = it }
@@ -319,6 +322,15 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS index_audio_memos_createdAtEpochMillis " +
                         "ON audio_memos (createdAtEpochMillis)",
                 )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS management_periods (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, startEpochDay INTEGER NOT NULL, endEpochDay INTEGER NOT NULL, snapshotText TEXT NOT NULL, createdAt INTEGER NOT NULL)")
+                db.execSQL("ALTER TABLE audio_memos ADD COLUMN transcriptWordsJson TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE audio_memos ADD COLUMN transcriptionState TEXT NOT NULL DEFAULT 'NONE'")
+                db.execSQL("ALTER TABLE audio_memos ADD COLUMN transcriptionError TEXT NOT NULL DEFAULT ''")
             }
         }
 

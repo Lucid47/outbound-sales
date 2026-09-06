@@ -99,24 +99,24 @@ fun PhotoMemoDialog(
 ) {
     val photos by viewModel.selectedCustomerPhotos.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+    var pendingCameraPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var pendingImports by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var viewerPhoto by remember { mutableStateOf<PhotoMemoEntity?>(null) }
     var cameraError by remember { mutableStateOf<String?>(null) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
-        val file = pendingCameraFile
+        val file = pendingCameraPath?.let(::File)
         if (saved && file != null) viewModel.saveCapturedPhoto(customerId, file) else file?.delete()
-        pendingCameraFile = null
+        pendingCameraPath = null
     }
     fun launchCamera() {
         runCatching {
             val file = viewModel.createCameraFile(customerId)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-            pendingCameraFile = file
+            pendingCameraPath = file.absolutePath
             camera.launch(uri)
         }.onFailure { error ->
-            pendingCameraFile?.delete()
-            pendingCameraFile = null
+            pendingCameraPath?.let(::File)?.delete()
+            pendingCameraPath = null
             cameraError = error.message ?: "카메라를 실행하지 못했습니다."
         }
     }
@@ -348,14 +348,13 @@ fun AudioMemoDialog(
     val saveRecording: (Boolean) -> Unit = { autoTranscribe ->
         recording.filePath?.let(::File)?.let { file ->
             viewModel.saveAudioMemo(
-                customerId = customerId,
+                customerId = recording.customerId ?: customerId,
                 file = file,
                 durationMillis = recording.durationMillis,
                 transcript = transcript,
                 autoTranscribe = autoTranscribe,
             )
             transcript = ""
-            VoiceRecordingService.resetFinished()
         }
     }
     val notificationPermission = rememberLauncherForActivityResult(
@@ -364,7 +363,7 @@ fun AudioMemoDialog(
         saveRecording(true)
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) VoiceRecordingService.start(context, viewModel.createAudioFile(customerId).absolutePath)
+        if (granted) VoiceRecordingService.start(context, viewModel.createAudioFile(customerId).absolutePath, customerId)
     }
 
     if (showModelDownloadNotice) {
@@ -431,7 +430,7 @@ fun AudioMemoDialog(
                         status = recording.status,
                         onStart = {
                             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                VoiceRecordingService.start(context, viewModel.createAudioFile(customerId).absolutePath)
+                                VoiceRecordingService.start(context, viewModel.createAudioFile(customerId).absolutePath, customerId)
                             } else permission.launch(Manifest.permission.RECORD_AUDIO)
                         },
                         onPause = { VoiceRecordingService.pause(context) },
@@ -530,6 +529,7 @@ private fun AudioMemoRow(
     onRetryTranscription: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    var showDetail by remember { mutableStateOf(false) }
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -550,8 +550,11 @@ private fun AudioMemoRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
                     val current = player ?: MediaPlayer().apply {
-                        setDataSource(entry.filePath)
-                        prepare()
+                        runCatching { setDataSource(entry.filePath); prepare() }.getOrElse {
+                            release()
+                            showDetail = true
+                            return@IconButton
+                        }
                         setOnCompletionListener { playing = false; progress = 0f }
                         player = this
                     }
@@ -561,6 +564,9 @@ private fun AudioMemoRow(
                     Text(
                         when {
                             transcriptionProgress != null -> transcriptionProgress
+                            entry.transcriptionState == "QUEUED" -> "전사 대기 중"
+                            entry.transcriptionState == "RUNNING" -> "전사 중"
+                            entry.transcriptionState == "FAILED" -> entry.transcriptionError
                             entry.transcript.isBlank() -> "전사 없음"
                             else -> entry.transcript
                         },
@@ -569,7 +575,8 @@ private fun AudioMemoRow(
                     )
                     Text(formatDuration(entry.durationMillis), style = MaterialTheme.typography.bodySmall)
                 }
-                if (entry.transcript.isBlank() && transcriptionProgress == null) {
+                if (transcriptionProgress == null && entry.transcriptionState !in setOf("QUEUED", "RUNNING") &&
+                    (entry.transcript.isBlank() || entry.transcriptWordsJson == "[]")) {
                     TextButton(onClick = onRetryTranscription) { Text("전사 재시도") }
                 }
                 IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "삭제") }
@@ -581,8 +588,10 @@ private fun AudioMemoRow(
                     player?.let { it.seekTo((it.duration * next).toInt()) }
                 },
             )
+            TextButton(onClick = { player?.pause(); playing = false; showDetail = true }) { Text("전체 전사 보기") }
         }
     }
+    if (showDetail) AudioMemoDetail(entry) { showDetail = false }
 }
 
 private fun decodeBitmap(path: String, maxSize: Int) = runCatching {

@@ -26,6 +26,12 @@ data class ImportUiState(
     val progress: ImportProgress = ImportProgress(),
     val resultMessage: String? = null,
     val errorMessage: String? = null,
+    val previewOpen: Boolean = false,
+    val previewPage: Int = 0,
+    val previewRows: List<com.lucid47.soheeyagaja.domain.importing.ImportedCustomer> = emptyList(),
+    val previewHasMore: Boolean = false,
+    val selectAllRows: Boolean = true,
+    val selectionExceptions: Set<Long> = emptySet(),
 )
 
 enum class ContactImportStep {
@@ -75,6 +81,9 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { state ->
             state.copy(
                 selectedUri = uri,
+                previewOpen = false,
+                selectionExceptions = emptySet(),
+                selectAllRows = true,
                 selectedFileName = displayName,
                 listName = displayName.substringBeforeLast('.').ifBlank { "새 고객리스트" },
                 progress = ImportProgress(),
@@ -87,6 +96,20 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
     fun updateListName(value: String) {
         _uiState.update { it.copy(listName = value, resultMessage = null, errorMessage = null) }
     }
+
+    fun previewCsv(page: Int = 0) {
+        val uri = _uiState.value.selectedUri ?: return
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) {
+                requireNotNull(getApplication<Application>().contentResolver.openInputStream(uri)).use { repository.previewCsv(it, page) }
+            } }.onSuccess { (rows, more) -> _uiState.update { it.copy(previewOpen = true, previewPage = page, previewRows = rows, previewHasMore = more) } }
+                .onFailure { error -> _uiState.update { it.copy(errorMessage = error.message) } }
+        }
+    }
+
+    fun closeCsvPreview() { _uiState.update { it.copy(previewOpen = false) } }
+    fun selectAllCsvRows(value: Boolean) { _uiState.update { it.copy(selectAllRows = value, selectionExceptions = emptySet()) } }
+    fun toggleCsvRow(row: Long) { _uiState.update { it.copy(selectionExceptions = if (row in it.selectionExceptions) it.selectionExceptions - row else it.selectionExceptions + row) } }
 
     fun importSelectedFile() {
         val request = _uiState.value
@@ -103,6 +126,7 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update {
                 it.copy(
                     isImporting = true,
+                    previewOpen = false,
                     progress = ImportProgress(),
                     resultMessage = null,
                     errorMessage = null,
@@ -117,6 +141,8 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
                             source = source,
                             listName = request.listName,
                             sourceName = request.selectedFileName,
+                            selectAll = request.selectAllRows,
+                            selectionExceptions = request.selectionExceptions,
                             onProgress = { progress ->
                                 _uiState.update { it.copy(progress = progress) }
                             },

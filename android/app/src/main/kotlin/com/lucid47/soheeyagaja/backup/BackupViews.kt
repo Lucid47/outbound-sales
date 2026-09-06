@@ -268,6 +268,20 @@ fun BackupToolsDialog(
                     }
                 }
                 if (busy) item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() } }
+                item {
+                    FilledTonalButton(enabled = !busy && service.localRecoveryCopies().isNotEmpty(), onClick = {
+                        service.localRecoveryCopies().firstOrNull()?.let { file ->
+                            launchTask {
+                                val uri = Uri.fromFile(file)
+                                val preview = service.inspect(uri)
+                                restoreUri = uri
+                                restorePreview = preview
+                                selectedRestoreIds = preview.lists.mapTo(mutableSetOf()) { it.id }
+                                "기기 내 최신 복구본을 선택했습니다. 복원할 목록을 확인해주세요."
+                            }
+                        }
+                    }) { Text("기기 내 복구본 확인") }
+                }
                 message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
                 error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             }

@@ -191,7 +191,7 @@ private fun SoheeyaGajaApp(
                 customerLists = customerLists,
                 onFileSelected = importViewModel::selectFile,
                 onListNameChanged = importViewModel::updateListName,
-                onImport = importViewModel::importSelectedFile,
+                onImport = { importViewModel.previewCsv() },
                 modifier = modifier,
             )
             RootTab.HISTORY -> HistoryActivityScreen(customerViewModel, modifier)
@@ -231,7 +231,8 @@ private fun SettingsSummaryScreen(
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("앱 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("소희야 가자 Android 0.9.5")
+                        Text("소희야 가자 Android 0.10.0")
+                        com.lucid47.soheeyagaja.ui.DisplaySettingsPanel()
                         Text("고객리스트 ${lists.size}개 · 고객 ${lists.sumOf(CustomerListSummary::customerCount)}명")
                     }
                 }
@@ -308,6 +309,7 @@ private fun CustomerImportScreen(
     onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (uiState.previewOpen) com.lucid47.soheeyagaja.importing.CsvPreviewDialog(uiState, viewModel)
     val context = LocalContext.current
     var pendingContactRequest by remember { mutableStateOf<ContactPermissionRequest?>(null) }
     val contactPermissionLauncher = rememberLauncherForActivityResult(

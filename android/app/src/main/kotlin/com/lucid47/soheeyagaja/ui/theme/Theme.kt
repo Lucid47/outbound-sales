@@ -33,8 +33,10 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun SoheeyaGajaTheme(content: @Composable () -> Unit) {
+    val settings = com.lucid47.soheeyagaja.ui.rememberDisplaySettings()
+    val dark = when (settings.theme) { "DARK" -> true; "LIGHT" -> false; else -> isSystemInDarkTheme() }
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
+        colorScheme = if (dark) DarkColors else LightColors,
         content = content,
     )
 }
